@@ -4,6 +4,7 @@ __pycache__/
 .pytest_cache/
 outputs/
 .codex/
+.git_ssh/
 
 # Vendor repositories are kept as source references, not as nested Git history.
 assets/vendor/**/.git/
