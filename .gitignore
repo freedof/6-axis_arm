@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+outputs/
+.codex/
+
+# Vendor repositories are kept as source references, not as nested Git history.
+assets/vendor/**/.git/
+assets/vendor/**/.git_vendor_backup/

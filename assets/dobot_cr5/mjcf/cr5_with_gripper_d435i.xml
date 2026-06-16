@@ -1,0 +1,114 @@
+<mujoco model="dobot_cr5_with_gripper_d435i">
+  <compiler angle="radian" autolimits="true" />
+  <option timestep="0.002" gravity="0 0 -9.81" integrator="implicitfast" />
+  <visual>
+    <global offwidth="1280" offheight="960" />
+  </visual>
+  <default>
+    <joint damping="2.0" armature="0.02" frictionloss="0.02" />
+    <geom type="capsule" rgba="0.72 0.76 0.80 1" contype="0" conaffinity="0" />
+    <site size="0.012" rgba="0.1 0.45 0.95 1" />
+    <position kp="250" kv="18" forcerange="-120 120" />
+  </default>
+  <asset>
+    <material name="base_mat" rgba="0.28 0.31 0.34 1" />
+    <material name="link_mat" rgba="0.70 0.74 0.78 1" />
+    <material name="joint_mat" rgba="0.12 0.14 0.16 1" />
+    <material name="tool_mat" rgba="0.15 0.42 0.86 1" />
+    <texture name="grid" type="2d" builtin="checker" rgb1="0.88 0.88 0.86" rgb2="0.72 0.74 0.76" width="512" height="512" />
+    <material name="floor_mat" texture="grid" texrepeat="4 4" reflectance="0.15" />
+    <material name="gripper_palm_mat" rgba="0.18 0.20 0.22 1" />
+    <material name="gripper_finger_mat" rgba="0.06 0.07 0.08 1" />
+    <material name="gripper_pad_mat" rgba="0.02 0.02 0.02 1" />
+    <material name="d435i_body_mat" rgba="0.07 0.075 0.08 1" />
+    <material name="d435i_face_mat" rgba="0.015 0.018 0.022 1" />
+    <material name="d435i_lens_mat" rgba="0.03 0.08 0.14 1" />
+  </asset>
+  <worldbody>
+    <light name="key" pos="1.5 -2.0 2.5" dir="-1 1 -1" diffuse="0.8 0.8 0.8" />
+    <geom name="floor" type="plane" size="1.8 1.8 0.02" material="floor_mat" contype="0" conaffinity="0" />
+    <body name="target_marker" mocap="true" pos="0.35 -0.55 0.20">
+      <geom name="target_sphere" type="sphere" size="0.014" rgba="0.95 0.18 0.12 0.65" contype="0" conaffinity="0" />
+      <site name="target_site" pos="0 0 0" size="0.012" rgba="1 0.85 0.05 1" />
+    </body>
+    <body name="target_marker_b" mocap="true" pos="0.20 -0.60 0.30">
+      <geom name="target_sphere_b" type="sphere" size="0.014" rgba="0.12 0.50 0.95 0.65" contype="0" conaffinity="0" />
+      <site name="target_site_b" pos="0 0 0" size="0.012" rgba="0.05 0.90 1 1" />
+    </body>
+    <body name="base_link" pos="0 0 0">
+      <geom name="base_column" type="cylinder" size="0.105 0.07" pos="0 0 0.07" material="base_mat" />
+      <geom name="base_top" type="cylinder" size="0.075 0.025" pos="0 0 0.145" material="joint_mat" />
+      <body name="Link1" pos="0 0 0.147">
+        <joint name="joint1" type="hinge" axis="0 0 1" range="-3.14 3.14" />
+        <geom name="link1_joint" type="cylinder" size="0.070 0.055" pos="0 0 0" material="joint_mat" />
+        <geom name="link1_body" fromto="0 0 0.03 0 0 0.16" size="0.045" material="link_mat" />
+        <body name="Link2" pos="0 0 0" euler="1.5708 1.5708 0">
+          <joint name="joint2" type="hinge" axis="0 0 1" range="-3.14 3.14" />
+          <geom name="link2_joint" type="cylinder" size="0.060 0.055" pos="0 0 0" material="joint_mat" />
+          <geom name="link2_arm" fromto="0 0 0 -0.427 0 0" size="0.040" material="link_mat" />
+          <body name="Link3" pos="-0.427 0 0">
+            <joint name="joint3" type="hinge" axis="0 0 1" range="-2.86 2.86" />
+            <geom name="link3_joint" type="cylinder" size="0.055 0.050" pos="0 0 0" material="joint_mat" />
+            <geom name="link3_arm" fromto="0 0 0 -0.357 0 0.141" size="0.035" material="link_mat" />
+            <body name="Link4" pos="-0.357 0 0.141" euler="0 0 -1.5708">
+              <joint name="joint4" type="hinge" axis="0 0 1" range="-3.14 3.14" />
+              <geom name="link4_joint" type="cylinder" size="0.050 0.045" pos="0 0 0" material="joint_mat" />
+              <geom name="link4_body" fromto="0 0 0 0 -0.116 0" size="0.030" material="link_mat" />
+              <body name="Link5" pos="0 -0.116 0" euler="1.5708 0 0">
+                <joint name="joint5" type="hinge" axis="0 0 1" range="-3.14 3.14" />
+                <geom name="link5_joint" type="cylinder" size="0.045 0.040" pos="0 0 0" material="joint_mat" />
+                <geom name="link5_body" fromto="0 0 0 0 0.105 0" size="0.026" material="link_mat" />
+                <body name="Link6" pos="0 0.105 0" euler="-1.5708 0 0">
+                  <joint name="joint6" type="hinge" axis="0 0 1" range="-6.28 6.28" />
+                  <geom name="link6_joint" type="cylinder" size="0.040 0.035" pos="0 0 0" material="joint_mat" />
+                  <geom name="tool_stub" fromto="0 0 0 0 0 0.08" size="0.020" material="tool_mat" />
+                  <site name="tool0" pos="0 0 0.08" quat="1 0 0 0" />
+                  <body name="parallel_gripper" pos="0 0 0.08">
+                    <geom name="gripper_palm" type="box" pos="0 0 0.018" size="0.050 0.022 0.018" material="gripper_palm_mat" contype="1" conaffinity="1" />
+                    <site name="gripper_mount" pos="0 0 0" size="0.008" rgba="0.95 0.65 0.10 1" />
+                    <site name="gripper_tcp" pos="0 0 0.110" size="0.010" rgba="0.10 0.95 0.40 1" />
+                    <body name="gripper_left_finger" pos="0.023 0 0.052">
+                      <joint name="gripper_left_slide" type="slide" axis="1 0 0" range="0 0.035" damping="0.6" armature="0.001" />
+                      <geom name="gripper_left_finger_geom" type="box" pos="0 0 0.036" size="0.007 0.012 0.046" material="gripper_finger_mat" contype="1" conaffinity="1" />
+                      <geom name="gripper_left_pad" type="box" pos="-0.0075 0 0.020" size="0.004 0.013 0.024" material="gripper_pad_mat" friction="3.0 0.08 0.006" condim="4" solref="0.006 1" solimp="0.95 0.99 0.002" contype="1" conaffinity="1" />
+                    </body>
+                    <body name="gripper_right_finger" pos="-0.023 0 0.052">
+                      <joint name="gripper_right_slide" type="slide" axis="-1 0 0" range="0 0.035" damping="0.6" armature="0.001" />
+                      <geom name="gripper_right_finger_geom" type="box" pos="0 0 0.036" size="0.007 0.012 0.046" material="gripper_finger_mat" contype="1" conaffinity="1" />
+                      <geom name="gripper_right_pad" type="box" pos="0.0075 0 0.020" size="0.004 0.013 0.024" material="gripper_pad_mat" friction="3.0 0.08 0.006" condim="4" solref="0.006 1" solimp="0.95 0.99 0.002" contype="1" conaffinity="1" />
+                    </body>
+                    <body name="d435i_camera_body" pos="0 -0.060 0.024">
+                      <geom name="d435i_body_geom" type="box" pos="0 0 0" size="0.045 0.012 0.013" material="d435i_body_mat" contype="0" conaffinity="0" />
+                      <geom name="d435i_front_face" type="box" pos="0 0 0.0135" size="0.043 0.010 0.0015" material="d435i_face_mat" contype="0" conaffinity="0" />
+                      <geom name="d435i_left_ir_lens" type="cylinder" pos="-0.022 0 0.016" size="0.004 0.002" material="d435i_lens_mat" contype="0" conaffinity="0" />
+                      <geom name="d435i_rgb_lens" type="cylinder" pos="0 0 0.016" size="0.004 0.002" material="d435i_lens_mat" contype="0" conaffinity="0" />
+                      <geom name="d435i_right_ir_lens" type="cylinder" pos="0.022 0 0.016" size="0.004 0.002" material="d435i_lens_mat" contype="0" conaffinity="0" />
+                      <site name="d435i_mount" pos="0 0 -0.013" size="0.004" rgba="0.7 0.7 0.1 1" />
+                      <site name="d435i_depth_optical_frame" pos="0 0 0.018" size="0.004" rgba="0.1 0.8 1 1" />
+                      <camera name="d435i_depth" pos="0 0 0.018" xyaxes="1 0 0 0 -1 0" fovy="65" />
+                      <camera name="d435i_rgb" pos="0 0 0.018" xyaxes="1 0 0 0 -1 0" fovy="65" />
+                    </body>
+                  </body>
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+  <actuator>
+    <position name="joint1_position" joint="joint1" ctrlrange="-3.14 3.14" />
+    <position name="joint2_position" joint="joint2" ctrlrange="-3.14 3.14" />
+    <position name="joint3_position" joint="joint3" ctrlrange="-2.86 2.86" />
+    <position name="joint4_position" joint="joint4" ctrlrange="-3.14 3.14" />
+    <position name="joint5_position" joint="joint5" ctrlrange="-3.14 3.14" />
+    <position name="joint6_position" joint="joint6" ctrlrange="-6.28 6.28" />
+    <position name="gripper_left_position" joint="gripper_left_slide" ctrlrange="0 0.035" kp="120" kv="8" forcerange="-30 30" />
+    <position name="gripper_right_position" joint="gripper_right_slide" ctrlrange="0 0.035" kp="120" kv="8" forcerange="-30 30" />
+  </actuator>
+  <keyframe>
+    <key name="home" qpos="0 0 0 0 0 0 0.025 0.025" ctrl="0 0 0 0 0 0 0.025 0.025" />
+    <key name="ready" qpos="0 -0.6 0.85 0 -0.8 0 0.025 0.025" ctrl="0 -0.6 0.85 0 -0.8 0 0.025 0.025" />
+  </keyframe>
+</mujoco>
