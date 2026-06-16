@@ -10,6 +10,8 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from src.perception.vl_region import estimate_region_3d as estimate_vl_region_3d
+from src.perception.vl_region import locate_red_region_fixture, region3d_to_dict
 from src.sim.gripper_model import DEFAULT_GRIPPER_MODEL, write_gripper_model
 from src.sim.gripper_pick_motion import simulate_pick
 from src.sim.gripper_pick_scene import DEFAULT_PICK_MODEL, write_pick_scene_model
@@ -73,6 +75,9 @@ def get_robot_capabilities() -> dict[str, Any]:
             "pick_cube",
             "generate_d435i_scene",
             "render_d435i_preview",
+            "vl_locate_object_region",
+            "vl_locate_object_3d",
+            "estimate_region_3d",
         ],
         "validation_policy": "automatic pre-check passed; waiting for user GIF confirmation",
     }
@@ -213,6 +218,95 @@ def render_d435i_preview(
     }
 
 
+def vl_locate_object_region(
+    prompt: str,
+    output_dir: str | Path | None = None,
+    *,
+    provider: str = "color_fixture",
+    width: int = 424,
+    height: int = 240,
+    seed: int = 7,
+    pose: str = "scan",
+) -> dict[str, Any]:
+    if provider != "color_fixture":
+        raise ValueError("Only provider='color_fixture' is available locally; real VL providers should return the same region schema.")
+    output = _resolve_output_dir(output_dir, "vl_region")
+    observation = render_d435i_preview(output, width=width, height=height, seed=seed, pose=pose)
+    rgb_path = ROOT / observation["files"]["rgb"]
+    overlay_path = output / "vl_region_overlay.png"
+    region = locate_red_region_fixture(rgb_path, prompt=prompt, output_path=overlay_path)
+    region["overlay_path"] = _relative(Path(region["overlay_path"])) if region.get("overlay_path") else None
+    return {
+        "status": "ok",
+        "provider": provider,
+        "provider_note": "color_fixture is a deterministic stand-in for validating the VL-to-depth interface; replace it with a real VL model later.",
+        "prompt": prompt,
+        "observation": observation,
+        "region": region,
+    }
+
+
+def estimate_region_3d(
+    *,
+    region: dict[str, Any],
+    depth_path: str | Path,
+    intrinsics: list[list[float]],
+    extrinsic_world_to_camera: list[list[float]],
+) -> dict[str, Any]:
+    depth = Path(depth_path)
+    if not depth.is_absolute():
+        depth = ROOT / depth
+    result = estimate_vl_region_3d(
+        depth_path=depth,
+        intrinsics=intrinsics,
+        extrinsic_world_to_camera=extrinsic_world_to_camera,
+        region=region,
+    )
+    return {
+        "status": "ok",
+        "region": region,
+        "target_3d": region3d_to_dict(result),
+    }
+
+
+def vl_locate_object_3d(
+    prompt: str,
+    output_dir: str | Path | None = None,
+    *,
+    provider: str = "color_fixture",
+    width: int = 424,
+    height: int = 240,
+    seed: int = 7,
+    pose: str = "scan",
+) -> dict[str, Any]:
+    located = vl_locate_object_region(
+        prompt,
+        output_dir,
+        provider=provider,
+        width=width,
+        height=height,
+        seed=seed,
+        pose=pose,
+    )
+    observation = located["observation"]
+    estimate = estimate_region_3d(
+        region=located["region"],
+        depth_path=observation["files"]["raw_depth"],
+        intrinsics=observation["intrinsics"],
+        extrinsic_world_to_camera=observation["extrinsic_world_to_camera"],
+    )
+    return {
+        "status": "ok",
+        "scene_id": "gripper_pick_cube_d435i",
+        "prompt": prompt,
+        "provider": provider,
+        "observation": observation,
+        "region": located["region"],
+        "target_3d": estimate["target_3d"],
+        "next_step": "Use target_3d as input for grasp-pose generation; it is not yet a complete pick execution.",
+    }
+
+
 def simulate_pick_cube(frames: int = 120, fps: int = 20) -> dict[str, Any]:
     model_path = write_pick_scene_model(DEFAULT_PICK_MODEL)
     result = simulate_pick(model_path, frames=frames, fps=fps)
@@ -321,3 +415,11 @@ def _relative(path: Path) -> str:
         return str(Path(path).resolve().relative_to(ROOT))
     except ValueError:
         return str(Path(path).resolve())
+
+
+def _resolve_output_dir(output_dir: str | Path | None, default_name: str) -> Path:
+    output = (DEFAULT_D435I_OUTPUT_DIR / default_name) if output_dir is None else Path(output_dir)
+    if not output.is_absolute():
+        output = ROOT / output
+    output.mkdir(parents=True, exist_ok=True)
+    return output

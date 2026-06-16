@@ -90,6 +90,8 @@ vertical FOV:          65 deg
 
 注意：抓取瞬间相机离桌面/方块很近，可能低于 D435i 的 0.17 m 最小有效深度。因此默认验证姿态使用 `above` 预抓取观察位，而不是 `grasp` 贴近姿态。
 
+用于视觉定位时，推荐使用 `scan` 姿态。该姿态会让夹爪根部相机移动到方块上方更适合观察的位置，便于 VL 模型看到较完整的目标区域。
+
 ## 渲染预览
 
 生成 RGB、raw depth、noisy depth 和深度可视化图片：
@@ -119,9 +121,12 @@ outputs/d435i_preview/d435i_noisy_depth_vis.png
 .venv\Scripts\python src\sim\render_d435i_preview.py --pose above
 .venv\Scripts\python src\sim\render_d435i_preview.py --pose grasp
 .venv\Scripts\python src\sim\render_d435i_preview.py --pose lift
+.venv\Scripts\python src\sim\render_d435i_preview.py --pose scan
 ```
 
 其中 `grasp` 姿态预期可能出现有效深度比例下降，这是因为相机距离桌面和方块过近，不代表渲染失败。
+
+D435i 第一视角默认隐藏 MuJoCo site 标记，避免把黄色目标点、TCP 点等调试标记误当成真实物体。需要调试时可以在更底层渲染接口中打开 `show_sites`。
 
 ## 自动验证
 
@@ -129,6 +134,7 @@ outputs/d435i_preview/d435i_noisy_depth_vis.png
 
 ```powershell
 .venv\Scripts\python src\sim\verify_d435i_camera.py
+.venv\Scripts\python src\sim\verify_vl_region.py
 ```
 
 自动检查内容：
@@ -140,6 +146,7 @@ outputs/d435i_preview/d435i_noisy_depth_vis.png
 4. intrinsics 为 3x3。
 5. world-to-camera extrinsic 为 4x4。
 6. raw depth 和 noisy depth 有足够有效像素。
+7. VL 风格目标区域可以通过 depth 反投影成 3D 世界坐标。
 ```
 
 当前自动预检结果：
@@ -149,6 +156,12 @@ pose: above
 raw_depth_valid_ratio:   about 0.948
 noisy_depth_valid_ratio: about 0.947
 status: OK
+```
+
+VL 目标区域和深度反投影的详细说明见：
+
+```text
+docs/phase6_vl_perception.md
 ```
 
 ## 后续计划

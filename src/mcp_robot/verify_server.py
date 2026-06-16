@@ -35,6 +35,7 @@ def main() -> None:
             "get_scene_state",
             "pick_cube",
             "render_d435i_preview",
+            "vl_locate_object_3d",
         }
         missing = sorted(required - tool_names)
         if missing:
@@ -45,6 +46,8 @@ def main() -> None:
             raise RuntimeError("Capability response should include pick_cube.")
         if "render_d435i_preview" not in capabilities["available_skills"]:
             raise RuntimeError("Capability response should include render_d435i_preview.")
+        if "vl_locate_object_3d" not in capabilities["available_skills"]:
+            raise RuntimeError("Capability response should include vl_locate_object_3d.")
 
         scene_state = _call_tool(process, 4, "get_scene_state", {"scene_id": "gripper_pick_cube"})
         if scene_state["objects"][0]["name"] != "grasp_cube":
@@ -68,9 +71,24 @@ def main() -> None:
         if d435i_preview["raw_depth_stats"]["valid_ratio"] < 0.05:
             raise RuntimeError(f"D435i preview depth has too few valid pixels: {d435i_preview}")
 
-        pick_result = _call_tool(
+        vl_result = _call_tool(
             process,
             7,
+            "vl_locate_object_3d",
+            {
+                "prompt": "pick the red block",
+                "output_dir": "outputs/vl_region/mcp_verify",
+                "pose": "scan",
+                "width": 424,
+                "height": 240,
+            },
+        )
+        if vl_result["target_3d"]["valid_pixel_count"] < 20:
+            raise RuntimeError(f"VL 3D estimate should use valid depth pixels: {vl_result}")
+
+        pick_result = _call_tool(
+            process,
+            8,
             "pick_cube",
             {
                 "render_gif": True,
@@ -88,6 +106,7 @@ def main() -> None:
 
         print("tools:", ", ".join(sorted(tool_names)))
         print("d435i_preview_rgb:", d435i_preview["files"]["rgb"])
+        print("vl_target_world:", vl_result["target_3d"]["center_world_m"])
         print("pick_cube_status:", pick_result["status"])
         print("pick_cube_gif:", pick_result.get("gif"))
         print("status: OK")

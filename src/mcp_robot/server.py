@@ -37,6 +37,9 @@ class RobotMcpServer:
             "generate_pick_scene": lambda args: skills.generate_pick_scene(),
             "generate_d435i_scene": lambda args: skills.generate_d435i_scene(),
             "render_d435i_preview": self._render_d435i_preview,
+            "vl_locate_object_region": self._vl_locate_object_region,
+            "estimate_region_3d": self._estimate_region_3d,
+            "vl_locate_object_3d": self._vl_locate_object_3d,
             "simulate_pick_cube": self._simulate_pick_cube,
             "render_pick_cube_gif": self._render_pick_cube_gif,
             "pick_cube": self._pick_cube,
@@ -136,6 +139,36 @@ class RobotMcpServer:
             pose=str(args.get("pose", "above")),
         )
 
+    def _vl_locate_object_region(self, args: dict[str, Any]) -> dict[str, Any]:
+        return skills.vl_locate_object_region(
+            str(args.get("prompt", "target object")),
+            args.get("output_dir"),
+            provider=str(args.get("provider", "color_fixture")),
+            width=int(args.get("width", 424)),
+            height=int(args.get("height", 240)),
+            seed=int(args.get("seed", 7)),
+            pose=str(args.get("pose", "scan")),
+        )
+
+    def _estimate_region_3d(self, args: dict[str, Any]) -> dict[str, Any]:
+        return skills.estimate_region_3d(
+            region=args["region"],
+            depth_path=args["depth_path"],
+            intrinsics=args["intrinsics"],
+            extrinsic_world_to_camera=args["extrinsic_world_to_camera"],
+        )
+
+    def _vl_locate_object_3d(self, args: dict[str, Any]) -> dict[str, Any]:
+        return skills.vl_locate_object_3d(
+            str(args.get("prompt", "target object")),
+            args.get("output_dir"),
+            provider=str(args.get("provider", "color_fixture")),
+            width=int(args.get("width", 424)),
+            height=int(args.get("height", 240)),
+            seed=int(args.get("seed", 7)),
+            pose=str(args.get("pose", "scan")),
+        )
+
     def _pick_cube(self, args: dict[str, Any]) -> dict[str, Any]:
         return skills.pick_cube(
             render_gif=bool(args.get("render_gif", True)),
@@ -199,10 +232,33 @@ class RobotMcpServer:
                         "pose": {
                             "type": "string",
                             "default": "above",
-                            "enum": ["ready", "above", "grasp", "lift"],
+                            "enum": ["ready", "above", "grasp", "lift", "scan"],
                         },
                     }
                 ),
+            },
+            {
+                "name": "vl_locate_object_region",
+                "description": "Locate an object in the D435i RGB image and return a VL-style 2D region. The local provider is a deterministic fixture for integration testing.",
+                "inputSchema": _vl_observation_schema(),
+            },
+            {
+                "name": "estimate_region_3d",
+                "description": "Lift a VL 2D region to a 3D target estimate using D435i depth and camera calibration.",
+                "inputSchema": _object_schema(
+                    {
+                        "region": {"type": "object"},
+                        "depth_path": {"type": "string"},
+                        "intrinsics": {"type": "array"},
+                        "extrinsic_world_to_camera": {"type": "array"},
+                    },
+                    required=["region", "depth_path", "intrinsics", "extrinsic_world_to_camera"],
+                ),
+            },
+            {
+                "name": "vl_locate_object_3d",
+                "description": "Run VL-style object localization and lift the selected region to a 3D target estimate.",
+                "inputSchema": _vl_observation_schema(),
             },
             {
                 "name": "simulate_pick_cube",
@@ -242,12 +298,35 @@ class RobotMcpServer:
         sys.stdout.flush()
 
 
-def _object_schema(properties: dict[str, Any]) -> dict[str, Any]:
+def _object_schema(properties: dict[str, Any], required: list[str] | None = None) -> dict[str, Any]:
     return {
         "type": "object",
         "properties": properties,
+        **({"required": required} if required else {}),
         "additionalProperties": False,
     }
+
+
+def _vl_observation_schema() -> dict[str, Any]:
+    return _object_schema(
+        {
+            "prompt": {"type": "string", "default": "pick the target object"},
+            "provider": {
+                "type": "string",
+                "default": "color_fixture",
+                "enum": ["color_fixture"],
+            },
+            "output_dir": {"type": "string"},
+            "width": {"type": "integer", "default": 424, "minimum": 1},
+            "height": {"type": "integer", "default": 240, "minimum": 1},
+            "seed": {"type": "integer", "default": 7},
+            "pose": {
+                "type": "string",
+                "default": "scan",
+                "enum": ["ready", "above", "grasp", "lift", "scan"],
+            },
+        }
+    )
 
 
 def _render_schema() -> dict[str, Any]:

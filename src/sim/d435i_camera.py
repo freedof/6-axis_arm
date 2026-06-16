@@ -81,8 +81,13 @@ class D435iCamera:
         extrinsic[:3, 3] = -rotation_cv @ cam_pos
         return extrinsic
 
-    def render(self, *, apply_noise: bool = True) -> tuple[np.ndarray, np.ndarray]:
-        self.renderer.update_scene(self.data, camera=self.camera_name)
+    def render(self, *, apply_noise: bool = True, show_sites: bool = False) -> tuple[np.ndarray, np.ndarray]:
+        scene_option = mujoco.MjvOption()
+        mujoco.mjv_defaultOption(scene_option)
+        if not show_sites:
+            scene_option.sitegroup[:] = 0
+
+        self.renderer.update_scene(self.data, camera=self.camera_name, scene_option=scene_option)
         rgb = self.renderer.render().copy()
 
         self.renderer.enable_depth_rendering()

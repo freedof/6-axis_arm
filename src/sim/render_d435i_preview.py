@@ -15,7 +15,10 @@ if str(ROOT) not in sys.path:
 from src.sim.d435i_camera import D435iCamera, D435iParams, depth_stats
 from src.sim.d435i_model import DEFAULT_D435I_PICK_MODEL, write_d435i_pick_scene_model
 from src.sim.gripper_model import GRIPPER_OPEN_QPOS
+from src.robot.model import dobot_cr5_simplified
 from src.sim.gripper_pick_motion import GRIPPER_DOF, ROBOT_DOF, solve_pick_trajectory
+from src.sim.gripper_pick_motion import _solve_gripper_center_pose
+from src.sim.gripper_pick_scene import CUBE_CENTER
 
 
 DEFAULT_OUTPUT_DIR = ROOT / "outputs" / "d435i_preview"
@@ -105,6 +108,10 @@ def _render_context_rgb(model: mujoco.MjModel, data: mujoco.MjData, *, width: in
 
 
 def _trajectory_pose(trajectory, pose: str) -> np.ndarray:
+    if pose == "scan":
+        robot = dobot_cr5_simplified()
+        scan_center = np.array(CUBE_CENTER, dtype=float) + np.array([0.0, 0.0, 0.240], dtype=float)
+        return _solve_gripper_center_pose(robot, scan_center, [trajectory.q_lift, trajectory.q_above, trajectory.q_ready])
     poses = {
         "ready": trajectory.q_ready,
         "above": trajectory.q_above,
@@ -133,7 +140,7 @@ def main() -> None:
     parser.add_argument("--width", type=int, default=424)
     parser.add_argument("--height", type=int, default=240)
     parser.add_argument("--seed", type=int, default=7)
-    parser.add_argument("--pose", choices=("ready", "above", "grasp", "lift"), default="above")
+    parser.add_argument("--pose", choices=("ready", "above", "grasp", "lift", "scan"), default="above")
     args = parser.parse_args()
 
     model_path = write_d435i_pick_scene_model(args.model_output)

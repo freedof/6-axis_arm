@@ -13,6 +13,8 @@
 生成抓取场景
 生成 D435i 相机场景
 渲染 D435i RGB-D 预览
+通过 VL 风格区域定位目标
+将目标区域结合 depth 反投影到 3D
 仿真抓取方块
 渲染抓取 GIF
 执行 pick_cube 技能
@@ -174,6 +176,7 @@ automatic pre-check passed; waiting for user GIF confirmation
 6. RGB-D 相机状态导出
 7. 大模型技能编排器
 ```
+
 ## D435i 相机工具
 
 当前 MCP server 也暴露了夹爪根部 D435i 的基础感知能力。
@@ -227,3 +230,73 @@ raw/noisy depth 有效像素统计
 
 默认使用 `above` 预抓取观察位，因为 `grasp` 贴近姿态可能低于 D435i
 约 0.17 m 的最小有效深度。
+
+视觉定位建议使用 `scan` 姿态：
+
+```json
+{
+  "width": 424,
+  "height": 240,
+  "pose": "scan",
+  "output_dir": "outputs/d435i_preview"
+}
+```
+
+## VL 区域定位工具
+
+当前 MCP server 增加了三类感知工具：
+
+```text
+vl_locate_object_region
+estimate_region_3d
+vl_locate_object_3d
+```
+
+### vl_locate_object_region
+
+输入 RGB 图像和文本目标意图，返回 VL 风格的 2D 区域。目前本地 provider 是 `color_fixture`，用于验证接口；真实 VL 模型后续应返回相同 schema。
+
+典型调用：
+
+```json
+{
+  "prompt": "pick the red block",
+  "provider": "color_fixture",
+  "pose": "scan",
+  "width": 424,
+  "height": 240
+}
+```
+
+返回重点：
+
+```text
+bbox_xyxy
+confidence
+overlay_path
+RGB-D observation files
+```
+
+### estimate_region_3d
+
+输入 2D 区域、depth 文件、相机内参和 world-to-camera 外参，返回世界坐标下的 3D 目标点。
+
+该工具只负责几何反投影，不负责选择目标。
+
+### vl_locate_object_3d
+
+组合工具，先定位 2D 区域，再用 depth 得到 3D 目标点。
+
+典型结果：
+
+```json
+{
+  "target_3d": {
+    "center_world_m": [0.349362, -0.549244, 0.095],
+    "depth_m": 0.239994,
+    "valid_pixel_count": 728
+  }
+}
+```
+
+这里得到的是可见表面附近的目标点，可作为后续生成抓取姿态的输入，不等价于最终抓取动作。
