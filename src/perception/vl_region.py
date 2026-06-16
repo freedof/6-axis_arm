@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import base64
 from dataclasses import dataclass
+import json
+import os
 from pathlib import Path
 from typing import Any
+import urllib.error
+import urllib.request
 
 import numpy as np
 from PIL import Image, ImageDraw
@@ -17,6 +22,23 @@ class Region3D:
     valid_pixel_count: int
     bbox_xyxy: tuple[int, int, int, int]
     confidence: float
+
+
+VL_REGION_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "type": {"type": "string", "enum": ["bbox"]},
+        "label": {"type": "string"},
+        "bbox_xyxy": {
+            "type": "array",
+            "items": {"type": "number"},
+        },
+        "confidence": {"type": "number"},
+        "reasoning": {"type": "string"},
+    },
+    "required": ["type", "label", "bbox_xyxy", "confidence", "reasoning"],
+    "additionalProperties": False,
+}
 
 
 def locate_red_region_fixture(
@@ -60,6 +82,82 @@ def locate_red_region_fixture(
         "confidence": round(confidence, 4),
         "overlay_path": str(overlay_path) if overlay_path is not None else None,
     }
+
+
+def locate_manual_region(
+    region: dict[str, Any],
+    *,
+    prompt: str,
+    rgb_path: str | Path | None = None,
+    output_path: str | Path | None = None,
+) -> dict[str, Any]:
+    """Return a caller-provided region in the same schema used by VL providers."""
+    normalized = _normalize_region(region, prompt=prompt, provider="manual_region")
+    if rgb_path is not None and output_path is not None:
+        overlay_path = _draw_region_overlay(rgb_path, normalized, output_path, label="manual region")
+        normalized["overlay_path"] = str(overlay_path)
+    return normalized
+
+
+def locate_openai_vision_region(
+    rgb_path: str | Path,
+    *,
+    prompt: str,
+    output_path: str | Path | None = None,
+    model: str | None = None,
+    api_key: str | None = None,
+    timeout_s: float = 60.0,
+) -> dict[str, Any]:
+    """Call an OpenAI vision model and return a normalized bbox region."""
+    rgb_path = Path(rgb_path)
+    key = api_key or os.environ.get("OPENAI_API_KEY")
+    if not key:
+        raise RuntimeError("OPENAI_API_KEY is required for provider='openai_vision'.")
+
+    selected_model = model or os.environ.get("OPENAI_VL_MODEL", "gpt-5.5")
+    image = Image.open(rgb_path).convert("RGB")
+    width, height = image.size
+    image_url = _image_data_url(rgb_path)
+    instructions = (
+        "You are locating a manipulation target in a robot gripper camera image. "
+        "Return one tight bounding box around the single object that best matches the user's request. "
+        "Use pixel coordinates in the original image with bbox_xyxy = [x1, y1, x2, y2]. "
+        "If the object is partially occluded, bound the visible target surface. "
+        "Do not include robot fingers, table, shadows, or debug overlays unless the user explicitly asks for them."
+    )
+    user_text = (
+        f"Image size: width={width}, height={height}. "
+        f"Target request: {prompt}. "
+        "Return only the structured region."
+    )
+    payload = {
+        "model": selected_model,
+        "input": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "input_text", "text": instructions + "\n" + user_text},
+                    {"type": "input_image", "image_url": image_url},
+                ],
+            }
+        ],
+        "text": {
+            "format": {
+                "type": "json_schema",
+                "name": "vl_region",
+                "strict": True,
+                "schema": VL_REGION_SCHEMA,
+            }
+        },
+    }
+    response = _post_openai_response(payload, api_key=key, timeout_s=timeout_s)
+    raw_region = json.loads(_extract_response_text(response))
+    normalized = _normalize_region(raw_region, prompt=prompt, provider="openai_vision", image_size=(width, height))
+    normalized["model"] = selected_model
+    if output_path is not None:
+        overlay_path = _draw_region_overlay(rgb_path, normalized, output_path, label="OpenAI VL")
+        normalized["overlay_path"] = str(overlay_path)
+    return normalized
 
 
 def estimate_region_3d(
@@ -162,6 +260,107 @@ def _transform_points(transform: np.ndarray, points: np.ndarray) -> np.ndarray:
     return (transform @ homogeneous.T).T[:, :3]
 
 
+def _normalize_region(
+    region: dict[str, Any],
+    *,
+    prompt: str,
+    provider: str,
+    image_size: tuple[int, int] | None = None,
+) -> dict[str, Any]:
+    if region.get("type", "bbox") == "point":
+        x = float(region["x"])
+        y = float(region["y"])
+        radius = float(region.get("radius_px", 12))
+        region = {
+            "type": "bbox",
+            "label": str(region.get("label", "target_object")),
+            "bbox_xyxy": [x - radius, y - radius, x + radius + 1, y + radius + 1],
+            "confidence": float(region.get("confidence", 1.0)),
+            "reasoning": str(region.get("reasoning", "manual point converted to bbox")),
+        }
+
+    if region.get("type", "bbox") != "bbox":
+        raise ValueError("Only bbox and point regions are currently supported.")
+    if "bbox_xyxy" not in region:
+        raise ValueError("Region must include bbox_xyxy.")
+
+    bbox_values = [float(value) for value in region["bbox_xyxy"]]
+    if len(bbox_values) != 4:
+        raise ValueError(f"bbox_xyxy must contain four values, got {bbox_values}")
+    if image_size is None:
+        bbox = [int(round(value)) for value in bbox_values]
+    else:
+        bbox = list(_clip_bbox(tuple(int(round(value)) for value in bbox_values), image_size[0], image_size[1]))
+
+    confidence = float(region.get("confidence", 1.0))
+    return {
+        "type": "bbox",
+        "label": str(region.get("label", "target_object")),
+        "prompt": prompt,
+        "provider": provider,
+        "bbox_xyxy": bbox,
+        "confidence": round(float(np.clip(confidence, 0.0, 1.0)), 4),
+        "reasoning": str(region.get("reasoning", "")),
+        "overlay_path": region.get("overlay_path"),
+    }
+
+
+def _draw_region_overlay(
+    rgb_path: str | Path,
+    region: dict[str, Any],
+    output_path: str | Path,
+    *,
+    label: str,
+) -> Path:
+    output = Path(output_path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    overlay = Image.open(rgb_path).convert("RGB")
+    x1, y1, x2, y2 = _bbox_from_region(region, width=overlay.width, height=overlay.height)
+    draw = ImageDraw.Draw(overlay)
+    draw.rectangle((x1, y1, x2, y2), outline=(255, 230, 30), width=3)
+    draw.text((x1, max(0, y1 - 14)), label, fill=(255, 230, 30))
+    overlay.save(output)
+    return output
+
+
+def _image_data_url(path: Path) -> str:
+    mime = "image/png" if path.suffix.lower() == ".png" else "image/jpeg"
+    data = base64.b64encode(path.read_bytes()).decode("ascii")
+    return f"data:{mime};base64,{data}"
+
+
+def _post_openai_response(payload: dict[str, Any], *, api_key: str, timeout_s: float) -> dict[str, Any]:
+    data = json.dumps(payload).encode("utf-8")
+    request = urllib.request.Request(
+        "https://api.openai.com/v1/responses",
+        data=data,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout_s) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"OpenAI vision request failed: HTTP {exc.code}: {body}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"OpenAI vision request failed: {exc}") from exc
+
+
+def _extract_response_text(response: dict[str, Any]) -> str:
+    if isinstance(response.get("output_text"), str):
+        return response["output_text"]
+    for item in response.get("output", []):
+        if item.get("type") != "message":
+            continue
+        for content in item.get("content", []):
+            if content.get("type") == "output_text" and isinstance(content.get("text"), str):
+                return content["text"]
+    raise RuntimeError(f"Could not extract text output from OpenAI response: {response}")
+
+
 def _round_vector(values: np.ndarray) -> list[float]:
     return [round(float(value), 6) for value in values.tolist()]
-

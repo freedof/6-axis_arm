@@ -16,13 +16,21 @@ D435i RGB 图像
 
 ## 重要说明
 
-当前仓库中没有直接调用真实在线 VL 模型。为了先验证工程接口，项目加入了一个本地可重复的 `color_fixture` provider：
+当前仓库支持三种 provider：
+
+```text
+color_fixture   本地颜色规则，用于可重复自动测试
+manual_region   调用方手动传 bbox/point，用于调试和验收复现
+openai_vision   调用 OpenAI Responses API 的真实视觉语言模型
+```
+
+代码入口：
 
 ```text
 src/perception/vl_region.py
 ```
 
-这个 provider 会在 RGB 图中用颜色规则找到红色方块，并返回与真实 VL 模型一致的区域结构。它的作用不是替代 VL，而是先把下面这些接口固定住：
+`color_fixture` 会在 RGB 图中用颜色规则找到红色方块，并返回与真实 VL 模型一致的区域结构。它的作用不是替代 VL，而是先把下面这些接口固定住：
 
 ```text
 1. VL 输出格式。
@@ -32,7 +40,7 @@ src/perception/vl_region.py
 5. MCP 工具返回结构。
 ```
 
-后续接真实 VL 模型时，只需要新增 provider，让它返回同样的 region schema。
+`openai_vision` 是真实 VL provider。它只负责在图上输出目标区域，不直接输出关节角或 3D 坐标。
 
 ## VL 输出格式
 
@@ -75,6 +83,46 @@ src/perception/vl_region.py
 
 mask 的效果通常会比 bbox 更好，因为 bbox 内可能包含桌面、夹爪、背景等无关深度。
 
+## OpenAI Vision provider
+
+真实 provider 使用 OpenAI Responses API。根据 OpenAI 官方文档，Responses API 支持 `input_image` 图像输入，也支持通过 `text.format` 使用 JSON schema 结构化输出。
+
+环境变量：
+
+```powershell
+$env:OPENAI_API_KEY="sk-..."
+$env:OPENAI_VL_MODEL="gpt-5.5"
+```
+
+`OPENAI_VL_MODEL` 可选，默认值为 `gpt-5.5`。如果后续想控制成本或延迟，可以把它换成账号可用的视觉模型。
+
+MCP 调用示例：
+
+```json
+{
+  "prompt": "pick the red block",
+  "provider": "openai_vision",
+  "pose": "scan",
+  "width": 424,
+  "height": 240
+}
+```
+
+返回的 region 会被归一化成统一格式：
+
+```json
+{
+  "type": "bbox",
+  "label": "red block",
+  "provider": "openai_vision",
+  "bbox_xyxy": [199, 153, 225, 181],
+  "confidence": 0.86,
+  "model": "gpt-5.5"
+}
+```
+
+注意：真实 VL 模型可能框偏、框大、或选错目标。因此每次真实 VL 验证都应该查看 `overlay_path`，最终是否可用于抓取仍需要人工确认或增加更严格的自动检查。
+
 ## 深度反投影逻辑
 
 代码入口：
@@ -110,6 +158,7 @@ VL 识别需要相机看到足够完整的目标。原来的 `grasp` 姿态太�
 
 ```powershell
 .venv\Scripts\python src\sim\verify_vl_region.py
+.venv\Scripts\python src\sim\verify_openai_vl_provider.py
 ```
 
 验证内容：
@@ -117,11 +166,12 @@ VL 识别需要相机看到足够完整的目标。原来的 `grasp` 姿态太�
 ```text
 1. 生成 D435i scan 姿态 RGB-D 观测。
 2. 用本地 color_fixture 输出 VL 风格 bbox。
-3. 生成 overlay 图，展示目标区域。
-4. 在 bbox 内读取 raw depth。
-5. 用相机内外参反投影到世界坐标。
-6. 检查有效深度像素数量足够。
-7. 检查估计位置接近红色方块所在区域。
+3. 用 manual_region 验证调用方传入 bbox 的调试通道。
+4. 生成 overlay 图，展示目标区域。
+5. 在 bbox 内读取 raw depth。
+6. 用相机内外参反投影到世界坐标。
+7. 检查有效深度像素数量足够。
+8. 检查估计位置接近红色方块所在区域。
 ```
 
 典型输出文件：
@@ -141,6 +191,13 @@ status: OK
 ```
 
 这里的 z 值接近方块上表面，而不是方块中心。
+
+`verify_openai_vl_provider.py` 是可选真实模型验证：
+
+```text
+未设置 OPENAI_API_KEY: status SKIPPED
+已设置 OPENAI_API_KEY: 调用 openai_vision，生成 OpenAI VL overlay，并检查 depth 反投影
+```
 
 ## MCP 工具
 
@@ -190,8 +247,8 @@ overlay 图
 建议按以下顺序推进：
 
 ```text
-1. 增加真实 VL provider 接口，例如 OpenAI Vision / 本地 VLM / GroundingDINO + SAM。
-2. 增加 mask region 支持，减少 bbox 混入背景深度。
+1. 增加 mask region 支持，减少 bbox 混入背景深度。
+2. 为 OpenAI VL 结果增加多次采样/一致性检查。
 3. 将 target_3d 转换成候选抓取姿态。
 4. 调用现有 IK、碰撞检测和 RRT-Connect 生成抓取路径。
 5. 通过 MCP 编排“看图定位 -> 规划 -> 抓取 -> GIF 验收”闭环。

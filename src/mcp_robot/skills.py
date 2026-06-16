@@ -11,7 +11,8 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from src.perception.vl_region import estimate_region_3d as estimate_vl_region_3d
-from src.perception.vl_region import locate_red_region_fixture, region3d_to_dict
+from src.perception.vl_region import locate_manual_region, locate_openai_vision_region, locate_red_region_fixture
+from src.perception.vl_region import region3d_to_dict
 from src.sim.gripper_model import DEFAULT_GRIPPER_MODEL, write_gripper_model
 from src.sim.gripper_pick_motion import simulate_pick
 from src.sim.gripper_pick_scene import DEFAULT_PICK_MODEL, write_pick_scene_model
@@ -223,23 +224,35 @@ def vl_locate_object_region(
     output_dir: str | Path | None = None,
     *,
     provider: str = "color_fixture",
+    manual_region: dict[str, Any] | None = None,
+    model: str | None = None,
     width: int = 424,
     height: int = 240,
     seed: int = 7,
     pose: str = "scan",
 ) -> dict[str, Any]:
-    if provider != "color_fixture":
-        raise ValueError("Only provider='color_fixture' is available locally; real VL providers should return the same region schema.")
+    if provider not in ("color_fixture", "manual_region", "openai_vision"):
+        raise ValueError(f"Unknown VL provider: {provider}")
     output = _resolve_output_dir(output_dir, "vl_region")
     observation = render_d435i_preview(output, width=width, height=height, seed=seed, pose=pose)
     rgb_path = ROOT / observation["files"]["rgb"]
     overlay_path = output / "vl_region_overlay.png"
-    region = locate_red_region_fixture(rgb_path, prompt=prompt, output_path=overlay_path)
+    if provider == "color_fixture":
+        region = locate_red_region_fixture(rgb_path, prompt=prompt, output_path=overlay_path)
+        provider_note = "color_fixture is a deterministic stand-in for validating the VL-to-depth interface."
+    elif provider == "manual_region":
+        if manual_region is None:
+            raise ValueError("manual_region is required when provider='manual_region'.")
+        region = locate_manual_region(manual_region, prompt=prompt, rgb_path=rgb_path, output_path=overlay_path)
+        provider_note = "manual_region uses caller-provided coordinates for debugging and repeatable acceptance checks."
+    else:
+        region = locate_openai_vision_region(rgb_path, prompt=prompt, output_path=overlay_path, model=model)
+        provider_note = "openai_vision calls the OpenAI Responses API; it requires OPENAI_API_KEY."
     region["overlay_path"] = _relative(Path(region["overlay_path"])) if region.get("overlay_path") else None
     return {
         "status": "ok",
         "provider": provider,
-        "provider_note": "color_fixture is a deterministic stand-in for validating the VL-to-depth interface; replace it with a real VL model later.",
+        "provider_note": provider_note,
         "prompt": prompt,
         "observation": observation,
         "region": region,
@@ -274,6 +287,8 @@ def vl_locate_object_3d(
     output_dir: str | Path | None = None,
     *,
     provider: str = "color_fixture",
+    manual_region: dict[str, Any] | None = None,
+    model: str | None = None,
     width: int = 424,
     height: int = 240,
     seed: int = 7,
@@ -283,6 +298,8 @@ def vl_locate_object_3d(
         prompt,
         output_dir,
         provider=provider,
+        manual_region=manual_region,
+        model=model,
         width=width,
         height=height,
         seed=seed,

@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src.perception.vl_region import estimate_region_3d, locate_red_region_fixture, region3d_to_dict
+from src.perception.vl_region import estimate_region_3d, locate_manual_region, locate_red_region_fixture, region3d_to_dict
 from src.sim.d435i_model import DEFAULT_D435I_PICK_MODEL, write_d435i_pick_scene_model
 from src.sim.gripper_pick_scene import CUBE_CENTER
 from src.sim.render_d435i_preview import DEFAULT_OUTPUT_DIR, render_preview
@@ -20,6 +20,14 @@ def main() -> None:
     observation = render_preview(model_path, DEFAULT_OUTPUT_DIR, width=424, height=240, pose="scan")
     overlay = DEFAULT_OUTPUT_DIR / "vl_region_overlay.png"
     region = locate_red_region_fixture(observation["rgb_path"], prompt="pick the red block", output_path=overlay)
+    manual = locate_manual_region(
+        {"type": "bbox", "label": "red block", "bbox_xyxy": region["bbox_xyxy"], "confidence": 1.0},
+        prompt="pick the red block",
+        rgb_path=observation["rgb_path"],
+        output_path=DEFAULT_OUTPUT_DIR / "manual_region_overlay.png",
+    )
+    if manual["bbox_xyxy"] != region["bbox_xyxy"]:
+        raise RuntimeError(f"Manual provider should preserve bbox coordinates: manual={manual}, fixture={region}")
     region3d = estimate_region_3d(
         depth_path=observation["raw_depth_path"],
         intrinsics=observation["intrinsics"],

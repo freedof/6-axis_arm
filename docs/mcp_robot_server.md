@@ -254,7 +254,17 @@ vl_locate_object_3d
 
 ### vl_locate_object_region
 
-输入 RGB 图像和文本目标意图，返回 VL 风格的 2D 区域。目前本地 provider 是 `color_fixture`，用于验证接口；真实 VL 模型后续应返回相同 schema。
+输入 RGB 图像和文本目标意图，返回 VL 风格的 2D 区域。
+
+当前支持三种 provider：
+
+```text
+color_fixture
+manual_region
+openai_vision
+```
+
+`color_fixture` 用于本地可重复测试；`manual_region` 用于调用方手动传入 bbox/point；`openai_vision` 会调用 OpenAI Responses API，需要设置 `OPENAI_API_KEY`。
 
 典型调用：
 
@@ -265,6 +275,34 @@ vl_locate_object_3d
   "pose": "scan",
   "width": 424,
   "height": 240
+}
+```
+
+真实 VL 调用示例：
+
+```json
+{
+  "prompt": "pick the red block",
+  "provider": "openai_vision",
+  "model": "gpt-5.5",
+  "pose": "scan",
+  "width": 424,
+  "height": 240
+}
+```
+
+手动区域调试示例：
+
+```json
+{
+  "prompt": "pick the red block",
+  "provider": "manual_region",
+  "manual_region": {
+    "type": "bbox",
+    "label": "red block",
+    "bbox_xyxy": [199, 153, 225, 181],
+    "confidence": 1.0
+  }
 }
 ```
 

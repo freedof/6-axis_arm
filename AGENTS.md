@@ -111,6 +111,7 @@ Verify VL-style region localization and D435i depth back-projection:
 
 ```powershell
 .venv\Scripts\python src\sim\verify_vl_region.py
+.venv\Scripts\python src\sim\verify_openai_vl_provider.py
 ```
 
 Run and verify the local CR5 MCP server:
@@ -327,8 +328,11 @@ small numerical contact tolerance for the intended endpoint contact.
   records the external RealSense ROS mesh candidate and RGB-D validation flow.
 - VL-style object localization is documented in
   `docs/phase6_vl_perception.md`. The current local `color_fixture` provider
-  is only an integration-test stand-in; real VL providers should return the
-  same region schema and let depth/camera geometry compute 3D target points.
+  is only an integration-test stand-in. `manual_region` is available for
+  caller-provided bbox/point debugging. `openai_vision` calls the OpenAI
+  Responses API when `OPENAI_API_KEY` is set. Real VL providers should return
+  the same region schema and let depth/camera geometry compute 3D target
+  points.
 - The first local MCP server lives in `src/mcp_robot/server.py`. It exposes
   high-level tools such as `get_robot_capabilities`, `get_scene_state`, and
   `pick_cube`; it also exposes D435i/VL tools such as
@@ -378,6 +382,7 @@ Before reporting demo/rendering changes as complete, also run:
 .venv\Scripts\python src\sim\verify_obstacle_planning.py
 .venv\Scripts\python src\sim\verify_trajectory.py
 .venv\Scripts\python src\sim\verify_vl_region.py
+.venv\Scripts\python src\sim\verify_openai_vl_provider.py
 ```
 
 Before asking for user acceptance, generate or refresh GIFs for every validation
