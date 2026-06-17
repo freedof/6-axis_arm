@@ -130,7 +130,6 @@ Use these documents as the source of truth for details:
 
 ```text
 docs/validation_guide.md        Validation command groups and acceptance rules
-docs/post_rrt_connect_progress_article.md  Narrative progress after RRT-Connect
 docs/rrt_connect_test_report.md RRT-Connect cases, GIF mappings, scene checks
 docs/project_roadmap.md         Long-term roadmap toward LLM/VLA operation
 docs/phase3_planning.md         Planning and obstacle validation notes
