@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 import sys
 from typing import Any
@@ -32,7 +33,18 @@ def main() -> None:
     parser.add_argument(
         "--provider",
         default="color_fixture",
-        choices=["color_fixture", "manual_region", "openai_vision", "ark_coding_vision"],
+        choices=list(skills.VL_PROVIDERS),
+    )
+    parser.add_argument(
+        "--manual-regions-json",
+        default=None,
+        help="JSON object mapping pose names to bbox/point regions for manual_region or codex_vision.",
+    )
+    parser.add_argument(
+        "--manual-regions-file",
+        type=Path,
+        default=None,
+        help="Path to a JSON object mapping pose names to bbox/point regions.",
     )
     parser.add_argument("--model", default=None)
     parser.add_argument("--config-path", type=Path, default=None)
@@ -48,11 +60,13 @@ def main() -> None:
     parser.add_argument("--frames", type=int, default=0)
     parser.add_argument("--seed", type=int, default=7)
     args = parser.parse_args()
+    manual_regions = _load_manual_regions(args.manual_regions_json, args.manual_regions_file)
 
     result = skills.multi_view_vl_pick_cube(
         args.prompt,
         _resolve_path(args.output_dir),
         provider=args.provider,
+        manual_regions=manual_regions,
         model=args.model,
         config_path=args.config_path,
         camera_width=args.camera_width,
@@ -99,6 +113,17 @@ def _candidate_summary(candidate: dict[str, Any]) -> dict[str, Any]:
 
 def _resolve_path(path: Path) -> Path:
     return path if path.is_absolute() else ROOT / path
+
+
+def _load_manual_regions(regions_json: str | None, regions_file: Path | None) -> dict[str, dict[str, Any]] | None:
+    if regions_json and regions_file:
+        raise ValueError("Pass either --manual-regions-json or --manual-regions-file, not both.")
+    if regions_json:
+        return json.loads(regions_json)
+    if regions_file:
+        path = _resolve_path(regions_file)
+        return json.loads(path.read_text(encoding="utf-8-sig"))
+    return None
 
 
 if __name__ == "__main__":

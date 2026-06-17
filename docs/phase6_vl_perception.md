@@ -21,6 +21,7 @@ D435i RGB 图像
 ```text
 color_fixture   本地颜色规则，用于可重复自动测试
 manual_region   调用方手动传 bbox/point，用于调试和验收复现
+codex_vision    Codex 在当前对话中看图后传 bbox/point，用于交互式 VL 服务
 openai_vision   调用 OpenAI Responses API 的真实视觉语言模型
 ark_coding_vision  调用火山方舟 coding plan 的 OpenAI-compatible 接口
 ```
@@ -55,7 +56,9 @@ config/vl_providers.local.json
 5. MCP 工具返回结构。
 ```
 
-`openai_vision` 和 `ark_coding_vision` 是真实 VL provider。它们只负责在图上输出目标区域，不直接输出关节角或 3D 坐标。
+`codex_vision` 是当前阶段优先使用的交互式 VL provider：D435i 负责拍照，Codex 在对话中查看 RGB 图并给出 bbox/point，项目代码再把该区域反投影到 3D 并接入抓取规划。它适合 Codex 操作和验证演示，但不是无人值守的外部视觉服务。
+
+`openai_vision` 和 `ark_coding_vision` 是外部真实 VL provider。它们只负责在图上输出目标区域，不直接输出关节角或 3D 坐标。
 
 ## VL 输出格式
 

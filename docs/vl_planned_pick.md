@@ -143,7 +143,14 @@ multi_view_vl_pick_cube
 ```json
 {
   "prompt": "pick the red block",
-  "provider": "color_fixture",
+  "provider": "codex_vision",
+  "manual_region": {
+    "type": "bbox",
+    "label": "red block",
+    "bbox_xyxy": [204, 140, 220, 159],
+    "confidence": 1.0,
+    "reasoning": "Codex inspected the D435i RGB image and selected the visible red cube."
+  },
   "pose": "scan",
   "render_gif": true
 }

@@ -1,6 +1,6 @@
 ---
 name: vl-robot-perception
-description: Use for this Dobot CR5 MuJoCo project when Codex needs to locate a manipulation target from the gripper-mounted D435i RGB-D camera, use Codex itself as a human-in-the-loop VL judge, call a configured VL provider such as color_fixture/manual_region/openai_vision/ark_coding_vision, convert a 2D bbox or point into a 3D world target with depth, or report VL overlay/validation results before grasp planning.
+description: Use for this Dobot CR5 MuJoCo project when Codex needs to locate a manipulation target from the gripper-mounted D435i RGB-D camera, use Codex itself as a human-in-the-loop VL judge, call a configured VL provider such as color_fixture/manual_region/codex_vision/openai_vision/ark_coding_vision, convert a 2D bbox or point into a 3D world target with depth, or report VL overlay/validation results before grasp planning.
 ---
 
 # VL Robot Perception
@@ -23,6 +23,7 @@ Use this skill for the `F:\6-axis arm` project when the user asks Codex to find 
 2. Choose the provider.
    - `color_fixture`: deterministic local validation for the red cube.
    - `manual_region`: Codex inspects the image in the conversation and supplies bbox/point coordinates.
+   - `codex_vision`: Codex inspects the image in the current session and supplies bbox/point coordinates, while the project records it as a Codex-in-the-loop VL provider.
    - `openai_vision`: calls the OpenAI Responses API using `config/vl_providers.local.json`.
    - `ark_coding_vision`: calls the Ark coding OpenAI-compatible endpoint using `config/vl_providers.local.json`.
    - To configure real providers, copy `config/vl_providers.example.json` to `config/vl_providers.local.json` and fill in the API key. Do not commit the local file.
@@ -55,7 +56,7 @@ Use this skill for the `F:\6-axis arm` project when the user asks Codex to find 
      ```json
      {
        "prompt": "pick the red block",
-       "provider": "manual_region",
+       "provider": "codex_vision",
        "manual_region": {
          "type": "bbox",
          "label": "red block",
@@ -129,7 +130,7 @@ Use this skill for the `F:\6-axis arm` project when the user asks Codex to find 
 5. Always report the result as an automatic pre-check, not final grasp acceptance.
    - Include the overlay path.
    - Include bbox/point, 3D world target, depth value, and valid depth pixel count.
-   - State whether the provider was `color_fixture`, `manual_region`, `openai_vision`, or `ark_coding_vision`.
+   - State whether the provider was `color_fixture`, `manual_region`, `codex_vision`, `openai_vision`, or `ark_coding_vision`.
    - If a real provider was skipped because no local config/API key exists, say so plainly.
 
 ## Validation
@@ -165,7 +166,7 @@ reason: config/vl_providers.local.json is missing or ark_coding_vision.api_key i
 ## Interpretation Rules
 
 - Treat Codex as a usable VL judge for interactive debugging, visual acceptance, and manual bbox/point selection.
-- Do not present Codex-in-the-loop VL as an autonomous runtime vision service.
+- Do not present Codex-in-the-loop VL as an autonomous unattended runtime vision service; it is valid for interactive debugging, validation, and Codex-operated demos.
 - Treat `target_3d.center_world_m` as a visible-surface target estimate, not a final grasp pose.
 - Convert the 3D target into a grasp pose before planning.
 - For the current cube scene, convert the visible top-surface target into a cube-center estimate before top grasping.

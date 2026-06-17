@@ -424,7 +424,7 @@ def _vl_observation_schema() -> dict[str, Any]:
             "provider": {
                 "type": "string",
                 "default": "color_fixture",
-                "enum": ["color_fixture", "manual_region", "openai_vision", "ark_coding_vision"],
+                "enum": list(skills.VL_PROVIDERS),
             },
             "manual_region": {"type": "object"},
             "model": {"type": "string"},
@@ -462,7 +462,7 @@ def _vl_pick_schema() -> dict[str, Any]:
             "provider": {
                 "type": "string",
                 "default": "color_fixture",
-                "enum": ["color_fixture", "manual_region", "openai_vision", "ark_coding_vision"],
+                "enum": list(skills.VL_PROVIDERS),
             },
             "manual_region": {"type": "object"},
             "model": {"type": "string"},
@@ -488,7 +488,7 @@ def _multi_view_vl_schema(*, include_render: bool) -> dict[str, Any]:
         "provider": {
             "type": "string",
             "default": "color_fixture",
-            "enum": ["color_fixture", "manual_region", "openai_vision", "ark_coding_vision"],
+            "enum": list(skills.VL_PROVIDERS),
         },
         "manual_regions": {
             "type": "object",

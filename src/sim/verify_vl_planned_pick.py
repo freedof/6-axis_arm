@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import math
 from pathlib import Path
 import sys
@@ -34,7 +35,18 @@ def main() -> None:
     parser.add_argument(
         "--provider",
         default="color_fixture",
-        choices=["color_fixture", "manual_region", "openai_vision", "ark_coding_vision"],
+        choices=list(skills.VL_PROVIDERS),
+    )
+    parser.add_argument(
+        "--manual-region-json",
+        default=None,
+        help="JSON bbox/point region for manual_region or codex_vision providers.",
+    )
+    parser.add_argument(
+        "--manual-region-file",
+        type=Path,
+        default=None,
+        help="Path to a JSON bbox/point region for manual_region or codex_vision providers.",
     )
     parser.add_argument("--model", default=None)
     parser.add_argument("--config-path", type=Path, default=None)
@@ -47,16 +59,18 @@ def main() -> None:
     parser.add_argument("--fps", type=int, default=20)
     parser.add_argument("--frames", type=int, default=0, help="0 means derive frames from planned playback duration.")
     parser.add_argument("--seed", type=int, default=7)
-    parser.add_argument("--pose", default="scan", choices=["ready", "above", "grasp", "lift", "scan"])
+    parser.add_argument("--pose", default="scan", choices=list(skills.POSE_CHOICES))
     parser.add_argument("--no-shortcut", action="store_true")
     args = parser.parse_args()
 
     output_dir = _resolve_path(args.output_dir)
     gif_path = _resolve_path(args.gif)
+    manual_region = _load_manual_region(args.manual_region_json, args.manual_region_file)
     located = skills.vl_locate_object_3d(
         args.prompt,
         output_dir,
         provider=args.provider,
+        manual_region=manual_region,
         model=args.model,
         config_path=args.config_path,
         width=args.camera_width,
@@ -127,6 +141,17 @@ def _round_vector(values: np.ndarray) -> list[float]:
 
 def _resolve_path(path: Path) -> Path:
     return path if path.is_absolute() else ROOT / path
+
+
+def _load_manual_region(region_json: str | None, region_file: Path | None) -> dict[str, Any] | None:
+    if region_json and region_file:
+        raise ValueError("Pass either --manual-region-json or --manual-region-file, not both.")
+    if region_json:
+        return json.loads(region_json)
+    if region_file:
+        path = _resolve_path(region_file)
+        return json.loads(path.read_text(encoding="utf-8-sig"))
+    return None
 
 
 if __name__ == "__main__":

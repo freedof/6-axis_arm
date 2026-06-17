@@ -261,11 +261,12 @@ vl_locate_object_3d
 ```text
 color_fixture
 manual_region
+codex_vision
 openai_vision
 ark_coding_vision
 ```
 
-`color_fixture` 用于本地可重复测试；`manual_region` 用于调用方手动传入 bbox/point；`openai_vision` 会调用 OpenAI Responses API；`ark_coding_vision` 会调用火山方舟 coding plan 的 OpenAI-compatible chat-completions endpoint。真实 provider 的 API Key、Base URL、模型名从 `config/vl_providers.local.json` 读取。
+`color_fixture` 用于本地可重复测试；`manual_region` 用于调用方手动传入 bbox/point；`codex_vision` 用于由当前 Codex 会话看图后传入 bbox/point，并在结果中明确记录为 Codex-in-the-loop VL；`openai_vision` 会调用 OpenAI Responses API；`ark_coding_vision` 会调用火山方舟 coding plan 的 OpenAI-compatible chat-completions endpoint。真实 provider 的 API Key、Base URL、模型名从 `config/vl_providers.local.json` 读取。
 
 首次配置：
 

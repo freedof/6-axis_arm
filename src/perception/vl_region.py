@@ -102,6 +102,28 @@ def locate_manual_region(
     return normalized
 
 
+def locate_codex_vision_region(
+    region: dict[str, Any],
+    *,
+    prompt: str,
+    rgb_path: str | Path | None = None,
+    output_path: str | Path | None = None,
+) -> dict[str, Any]:
+    """Return a Codex-inspected region for interactive VL validation.
+
+    The repository cannot call the current Codex conversation as a runtime API.
+    Instead, Codex inspects the rendered RGB image in the chat, supplies the
+    bbox/point, and this provider normalizes it into the same schema as the
+    autonomous VL providers.
+    """
+    normalized = _normalize_region(region, prompt=prompt, provider="codex_vision")
+    normalized["provider_note"] = "Codex-in-the-loop visual region supplied from the current Codex session."
+    if rgb_path is not None and output_path is not None:
+        overlay_path = _draw_region_overlay(rgb_path, normalized, output_path, label="Codex VL")
+        normalized["overlay_path"] = str(overlay_path)
+    return normalized
+
+
 def locate_openai_vision_region(
     rgb_path: str | Path,
     *,

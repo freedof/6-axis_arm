@@ -13,6 +13,7 @@ if str(ROOT) not in sys.path:
 
 from src.perception.vl_region import estimate_region_3d as estimate_vl_region_3d
 from src.perception.vl_region import locate_ark_coding_vision_region
+from src.perception.vl_region import locate_codex_vision_region
 from src.perception.vl_region import locate_manual_region, locate_openai_vision_region, locate_red_region_fixture
 from src.perception.vl_region import region3d_to_dict
 from src.sim.gripper_model import DEFAULT_GRIPPER_MODEL, write_gripper_model
@@ -56,6 +57,7 @@ SCENES: dict[str, dict[str, Any]] = {
 
 
 MULTI_VIEW_DEFAULT_POSES = ("scan_high", "scan_front_high", "scan_left_high", "scan_right_high")
+VL_PROVIDERS = ("color_fixture", "manual_region", "codex_vision", "openai_vision", "ark_coding_vision")
 
 
 def get_robot_capabilities() -> dict[str, Any]:
@@ -243,7 +245,7 @@ def vl_locate_object_region(
     seed: int = 7,
     pose: str = "scan",
 ) -> dict[str, Any]:
-    if provider not in ("color_fixture", "manual_region", "openai_vision", "ark_coding_vision"):
+    if provider not in VL_PROVIDERS:
         raise ValueError(f"Unknown VL provider: {provider}")
     output = _resolve_output_dir(output_dir, "vl_region")
     observation = render_d435i_preview(output, width=width, height=height, seed=seed, pose=pose)
@@ -257,6 +259,11 @@ def vl_locate_object_region(
             raise ValueError("manual_region is required when provider='manual_region'.")
         region = locate_manual_region(manual_region, prompt=prompt, rgb_path=rgb_path, output_path=overlay_path)
         provider_note = "manual_region uses caller-provided coordinates for debugging and repeatable acceptance checks."
+    elif provider == "codex_vision":
+        if manual_region is None:
+            raise ValueError("manual_region is required when provider='codex_vision'. Codex must inspect the RGB image and provide a bbox/point.")
+        region = locate_codex_vision_region(manual_region, prompt=prompt, rgb_path=rgb_path, output_path=overlay_path)
+        provider_note = "codex_vision uses a Codex-inspected bbox/point from the current interactive session."
     elif provider == "openai_vision":
         region = locate_openai_vision_region(
             rgb_path,
@@ -308,6 +315,10 @@ def _locate_region_from_observation(
         if manual_region is None:
             raise ValueError("manual_region is required when provider='manual_region'.")
         region = locate_manual_region(manual_region, prompt=prompt, rgb_path=rgb_path, output_path=overlay_path)
+    elif provider == "codex_vision":
+        if manual_region is None:
+            raise ValueError("manual_region is required when provider='codex_vision'. Codex must inspect the RGB image and provide a bbox/point.")
+        region = locate_codex_vision_region(manual_region, prompt=prompt, rgb_path=rgb_path, output_path=overlay_path)
     elif provider == "openai_vision":
         region = locate_openai_vision_region(
             rgb_path,
@@ -415,7 +426,7 @@ def multi_view_vl_locate_object_3d(
     max_surface_z_m: float = 0.140,
     max_cluster_radius_m: float = 0.040,
 ) -> dict[str, Any]:
-    if provider not in ("color_fixture", "manual_region", "openai_vision", "ark_coding_vision"):
+    if provider not in VL_PROVIDERS:
         raise ValueError(f"Unknown VL provider: {provider}")
     selected_poses = tuple(str(pose) for pose in poses)
     for pose in selected_poses:
