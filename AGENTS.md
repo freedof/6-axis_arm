@@ -245,6 +245,18 @@ docs/rrt_connect_test_report.md
 
 Keep case-specific details in that test document, not in this AGENTS.md file.
 
+## Project Skills
+
+This project includes a Codex skill for VL-assisted robot perception:
+
+```text
+.codex/skills/vl-robot-perception/SKILL.md
+```
+
+Use it when Codex should inspect D435i RGB images, act as a human-in-the-loop
+VL judge, produce a `manual_region` bbox/point, call `openai_vision`, or turn a
+VL region into a 3D world target through the MCP tools.
+
 ## Roadmap
 
 The long-term project roadmap is documented in:

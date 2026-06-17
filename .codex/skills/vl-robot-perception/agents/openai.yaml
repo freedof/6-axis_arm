@@ -1,0 +1,4 @@
+interface:
+  display_name: "VL Robot Perception"
+  short_description: "Locate manipulation targets with D435i RGB-D and VL providers."
+  default_prompt: "Use the VL robot perception workflow to locate a target object, estimate its 3D position, and report the overlay and validation status."
