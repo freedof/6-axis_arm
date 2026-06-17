@@ -77,6 +77,26 @@ Use this skill for the `F:\6-axis arm` project when the user asks Codex to find 
        "height": 240
      }
      ```
+   - To continue from a known 3D target into grasp planning and simulation, use
+     MCP tool `plan_pick_from_target_3d`:
+     ```json
+     {
+       "target_3d": {
+         "center_world_m": [0.349, -0.549, 0.095]
+       },
+       "render_gif": true
+     }
+     ```
+   - To run the whole closed loop from image capture through planned pick, use
+     MCP tool `vl_pick_cube`:
+     ```json
+     {
+       "prompt": "pick the red block",
+       "provider": "color_fixture",
+       "pose": "scan",
+       "render_gif": true
+     }
+     ```
    - For the user's Ark coding plan:
      ```json
      {
@@ -131,4 +151,6 @@ reason: config/vl_providers.local.json is missing or ark_coding_vision.api_key i
 - Do not present Codex-in-the-loop VL as an autonomous runtime vision service.
 - Treat `target_3d.center_world_m` as a visible-surface target estimate, not a final grasp pose.
 - Convert the 3D target into a grasp pose before planning.
+- For the current cube scene, convert the visible top-surface target into a cube-center estimate before top grasping.
+- Prefer `vl_pick_cube` when the user wants the full instruction -> D435i -> VL -> depth -> RRT-Connect -> pick flow.
 - For generated visual evidence, show the overlay image in the final response when possible.

@@ -15,7 +15,7 @@ from src.perception.vl_region import locate_ark_coding_vision_region
 from src.perception.vl_region import locate_manual_region, locate_openai_vision_region, locate_red_region_fixture
 from src.perception.vl_region import region3d_to_dict
 from src.sim.gripper_model import DEFAULT_GRIPPER_MODEL, write_gripper_model
-from src.sim.gripper_pick_motion import simulate_pick
+from src.sim.gripper_pick_motion import plan_pick_trajectory_from_target_3d, simulate_pick
 from src.sim.gripper_pick_scene import DEFAULT_PICK_MODEL, write_pick_scene_model
 from src.sim.d435i_model import DEFAULT_D435I_GRIPPER_MODEL, DEFAULT_D435I_PICK_MODEL, write_d435i_pick_scene_model
 from src.sim.render_d435i_preview import DEFAULT_OUTPUT_DIR as DEFAULT_D435I_OUTPUT_DIR
@@ -80,6 +80,8 @@ def get_robot_capabilities() -> dict[str, Any]:
             "vl_locate_object_region",
             "vl_locate_object_3d",
             "estimate_region_3d",
+            "plan_pick_from_target_3d",
+            "vl_pick_cube",
         ],
         "validation_policy": "automatic pre-check passed; waiting for user GIF confirmation",
     }
@@ -342,7 +344,7 @@ def vl_locate_object_3d(
         "observation": observation,
         "region": located["region"],
         "target_3d": estimate["target_3d"],
-        "next_step": "Use target_3d as input for grasp-pose generation; it is not yet a complete pick execution.",
+        "next_step": "Use plan_pick_from_target_3d or vl_pick_cube to convert target_3d into grasp poses and an RRT-Connect pick path.",
     }
 
 
@@ -434,6 +436,142 @@ def pick_cube(
     return response
 
 
+def plan_pick_from_target_3d(
+    target_3d: dict[str, Any] | list[float],
+    *,
+    render_gif: bool = True,
+    output_path: str | Path | None = None,
+    frames: int = 0,
+    fps: int = 20,
+    width: int = 960,
+    height: int = 720,
+    show_sites: bool = False,
+) -> dict[str, Any]:
+    target_surface_world = _target_3d_center(target_3d)
+    planned = plan_pick_trajectory_from_target_3d(target_surface_world)
+    model_path = write_pick_scene_model(DEFAULT_PICK_MODEL)
+    actual_frames = _pick_frames(planned, frames=frames, fps=fps)
+    result = simulate_pick(model_path, frames=actual_frames, fps=fps, planned_trajectory=planned)
+    response = _planned_pick_response(
+        skill="plan_pick_from_target_3d",
+        model_path=model_path,
+        target_surface_world=target_surface_world,
+        planned=planned,
+        result=result,
+        frames=actual_frames,
+        fps=fps,
+        width=width,
+        height=height,
+        show_sites=show_sites,
+    )
+    if render_gif:
+        output = (ROOT / "outputs" / "gripper_pick" / "target_3d_planned_pick_cube.gif") if output_path is None else Path(output_path)
+        if not output.is_absolute():
+            output = ROOT / output
+        render_pick_gif(
+            model_path,
+            output,
+            width=width,
+            height=height,
+            frames=actual_frames,
+            fps=fps,
+            show_sites=show_sites,
+            planned_trajectory=planned,
+        )
+        validate_gif(output, expected_frames=actual_frames, expected_size=(width, height), expected_fps=fps)
+        response["gif"] = _relative(output)
+        response["render"] = {
+            "width": width,
+            "height": height,
+            "frames": actual_frames,
+            "fps": fps,
+            "show_sites": show_sites,
+        }
+    return response
+
+
+def vl_pick_cube(
+    prompt: str,
+    output_dir: str | Path | None = None,
+    *,
+    provider: str = "color_fixture",
+    manual_region: dict[str, Any] | None = None,
+    model: str | None = None,
+    config_path: str | Path | None = None,
+    camera_width: int = 424,
+    camera_height: int = 240,
+    seed: int = 7,
+    pose: str = "scan",
+    render_gif: bool = True,
+    output_path: str | Path | None = None,
+    frames: int = 0,
+    fps: int = 20,
+    width: int = 960,
+    height: int = 720,
+    show_sites: bool = False,
+) -> dict[str, Any]:
+    located = vl_locate_object_3d(
+        prompt,
+        output_dir,
+        provider=provider,
+        manual_region=manual_region,
+        model=model,
+        config_path=config_path,
+        width=camera_width,
+        height=camera_height,
+        seed=seed,
+        pose=pose,
+    )
+    target_surface_world = _target_3d_center(located["target_3d"])
+    planned = plan_pick_trajectory_from_target_3d(target_surface_world)
+    model_path = write_pick_scene_model(DEFAULT_PICK_MODEL)
+    actual_frames = _pick_frames(planned, frames=frames, fps=fps)
+    result = simulate_pick(model_path, frames=actual_frames, fps=fps, planned_trajectory=planned)
+    response = _planned_pick_response(
+        skill="vl_pick_cube",
+        model_path=model_path,
+        target_surface_world=target_surface_world,
+        planned=planned,
+        result=result,
+        frames=actual_frames,
+        fps=fps,
+        width=width,
+        height=height,
+        show_sites=show_sites,
+    )
+    response["perception"] = {
+        "provider": provider,
+        "prompt": prompt,
+        "observation": located["observation"],
+        "region": located["region"],
+        "target_3d": located["target_3d"],
+    }
+    if render_gif:
+        output = (ROOT / "outputs" / "end_to_end" / "vl_planned_pick_cube.gif") if output_path is None else Path(output_path)
+        if not output.is_absolute():
+            output = ROOT / output
+        render_pick_gif(
+            model_path,
+            output,
+            width=width,
+            height=height,
+            frames=actual_frames,
+            fps=fps,
+            show_sites=show_sites,
+            planned_trajectory=planned,
+        )
+        validate_gif(output, expected_frames=actual_frames, expected_size=(width, height), expected_fps=fps)
+        response["gif"] = _relative(output)
+        response["render"] = {
+            "width": width,
+            "height": height,
+            "frames": actual_frames,
+            "fps": fps,
+            "show_sites": show_sites,
+        }
+    return response
+
+
 def _pick_metrics(result) -> dict[str, Any]:
     return {
         "initial_cube_pos_m": _round_vector(result.initial_cube_pos),
@@ -443,6 +581,81 @@ def _pick_metrics(result) -> dict[str, Any]:
         "lifted": bool(result.lifted),
         "automatic_check": "cube final z and max z exceed lift thresholds",
     }
+
+
+def _planned_pick_response(
+    *,
+    skill: str,
+    model_path: Path,
+    target_surface_world: np.ndarray,
+    planned,
+    result,
+    frames: int,
+    fps: int,
+    width: int,
+    height: int,
+    show_sites: bool,
+) -> dict[str, Any]:
+    status = "automatic_precheck_passed" if result.lifted else "failed"
+    return {
+        "status": status,
+        "scene_id": "gripper_pick_cube",
+        "skill": skill,
+        "object": "grasp_cube",
+        "model_path": _relative(model_path),
+        "target_surface_world_m": _round_vector(target_surface_world),
+        "planned_cube_center_m": _round_vector(planned.cube_center),
+        "grasp_poses": {
+            "q_ready": _round_vector(planned.poses.q_ready),
+            "q_above": _round_vector(planned.poses.q_above),
+            "q_grasp": _round_vector(planned.poses.q_grasp),
+            "q_lift": _round_vector(planned.poses.q_lift),
+        },
+        "rrt_connect": {
+            "segments": [_planned_segment_summary(segment) for segment in _planned_segments(planned)],
+            "playback_duration_s": round(float(planned.total_playback_duration), 3),
+        },
+        "metrics": _pick_metrics(result),
+        "render": {
+            "width": width,
+            "height": height,
+            "frames": frames,
+            "fps": fps,
+            "show_sites": show_sites,
+        },
+        "user_acceptance": "pending",
+    }
+
+
+def _planned_segments(planned) -> tuple[Any, Any, Any]:
+    return (planned.ready_to_above, planned.above_to_grasp, planned.grasp_to_lift)
+
+
+def _planned_segment_summary(segment) -> dict[str, Any]:
+    return {
+        "name": segment.name,
+        "reason": segment.reason,
+        "iterations": int(segment.iterations),
+        "raw_waypoints": len(segment.raw_path),
+        "waypoints": len(segment.path),
+        "duration_s": round(float(segment.trajectory.duration), 3),
+    }
+
+
+def _pick_frames(planned, *, frames: int, fps: int) -> int:
+    required = int(np.ceil(planned.total_playback_duration * fps))
+    return max(int(frames), required)
+
+
+def _target_3d_center(target_3d: dict[str, Any] | list[float]) -> np.ndarray:
+    if isinstance(target_3d, dict):
+        values = target_3d.get("center_world_m")
+    else:
+        values = target_3d
+    target = np.asarray(values, dtype=float)
+    if target.shape != (3,):
+        raise ValueError(f"target_3d must contain a 3D center_world_m, got shape {target.shape}")
+    return target
 
 
 def _round_vector(values: np.ndarray) -> list[float]:

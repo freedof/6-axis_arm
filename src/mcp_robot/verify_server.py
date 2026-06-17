@@ -36,6 +36,8 @@ def main() -> None:
             "pick_cube",
             "render_d435i_preview",
             "vl_locate_object_3d",
+            "plan_pick_from_target_3d",
+            "vl_pick_cube",
         }
         missing = sorted(required - tool_names)
         if missing:
@@ -48,6 +50,8 @@ def main() -> None:
             raise RuntimeError("Capability response should include render_d435i_preview.")
         if "vl_locate_object_3d" not in capabilities["available_skills"]:
             raise RuntimeError("Capability response should include vl_locate_object_3d.")
+        if "vl_pick_cube" not in capabilities["available_skills"]:
+            raise RuntimeError("Capability response should include vl_pick_cube.")
 
         scene_state = _call_tool(process, 4, "get_scene_state", {"scene_id": "gripper_pick_cube"})
         if scene_state["objects"][0]["name"] != "grasp_cube":
@@ -104,11 +108,34 @@ def main() -> None:
         if not pick_result["metrics"]["lifted"]:
             raise RuntimeError("pick_cube metrics should report lifted=true.")
 
+        planned_pick = _call_tool(
+            process,
+            9,
+            "vl_pick_cube",
+            {
+                "prompt": "pick the red block",
+                "provider": "color_fixture",
+                "output_dir": "outputs/end_to_end/mcp_vl_pick_verify",
+                "render_gif": True,
+                "frames": 0,
+                "fps": 20,
+                "width": 320,
+                "height": 240,
+                "output_path": "outputs/end_to_end/mcp_vl_pick_verify.gif",
+            },
+        )
+        if planned_pick["status"] != "automatic_precheck_passed":
+            raise RuntimeError(f"vl_pick_cube did not pass automatic pre-check: {planned_pick}")
+        if not planned_pick["metrics"]["lifted"]:
+            raise RuntimeError("vl_pick_cube metrics should report lifted=true.")
+
         print("tools:", ", ".join(sorted(tool_names)))
         print("d435i_preview_rgb:", d435i_preview["files"]["rgb"])
         print("vl_target_world:", vl_result["target_3d"]["center_world_m"])
         print("pick_cube_status:", pick_result["status"])
         print("pick_cube_gif:", pick_result.get("gif"))
+        print("vl_pick_cube_status:", planned_pick["status"])
+        print("vl_pick_cube_gif:", planned_pick.get("gif"))
         print("status: OK")
     finally:
         process.kill()

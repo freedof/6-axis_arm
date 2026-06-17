@@ -11,17 +11,25 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from src.planning.collision import MujocoCollisionChecker
+from src.planning.rrt_connect import RRTConnectConfig, plan_joint_rrt_connect, shortcut_path
+from src.planning.singularity import SingularityChecker
+from src.planning.trajectory import JointTrajectory, parameterize_joint_path
 from src.robot.ik import solve_ik_multi_start
 from src.robot.model import dobot_cr5_simplified
 from src.sim.demo_xyz_joint_roundtrip import READY_Q, TOOL_DOWN_ROTATION, make_tool_pose
 from src.sim.gripper_model import GRIPPER_OPEN_QPOS
-from src.sim.gripper_pick_scene import CUBE_CENTER
+from src.sim.gripper_pick_scene import CUBE_CENTER, CUBE_HALF_SIZE
+from src.sim.planning_model import write_planning_model
 
 
 ROBOT_DOF = 6
 GRIPPER_DOF = 2
 GRASP_CENTER_OFFSET = 0.072
 GRIPPER_CLOSED_QPOS = 0.0
+PLANNED_PICK_READY_DWELL_SECONDS = 0.6
+PLANNED_PICK_CLOSE_SECONDS = 0.8
+PLANNED_PICK_FINAL_DWELL_SECONDS = 1.0
 
 
 @dataclass(frozen=True)
@@ -33,12 +41,62 @@ class PickTrajectory:
 
 
 @dataclass(frozen=True)
+class PlannedPickSegment:
+    name: str
+    raw_path: tuple[np.ndarray, ...]
+    path: tuple[np.ndarray, ...]
+    trajectory: JointTrajectory
+    iterations: int
+    reason: str
+
+
+@dataclass(frozen=True)
+class PlannedPickTrajectory:
+    target_surface_world: np.ndarray
+    cube_center: np.ndarray
+    poses: PickTrajectory
+    ready_to_above: PlannedPickSegment
+    above_to_grasp: PlannedPickSegment
+    grasp_to_lift: PlannedPickSegment
+
+    @property
+    def total_motion_duration(self) -> float:
+        return (
+            self.ready_to_above.trajectory.duration
+            + self.above_to_grasp.trajectory.duration
+            + self.grasp_to_lift.trajectory.duration
+        )
+
+    @property
+    def total_playback_duration(self) -> float:
+        return (
+            PLANNED_PICK_READY_DWELL_SECONDS
+            + self.ready_to_above.trajectory.duration
+            + self.above_to_grasp.trajectory.duration
+            + PLANNED_PICK_CLOSE_SECONDS
+            + self.grasp_to_lift.trajectory.duration
+            + PLANNED_PICK_FINAL_DWELL_SECONDS
+        )
+
+
+@dataclass(frozen=True)
 class PickSimulationResult:
     initial_cube_pos: np.ndarray
     final_cube_pos: np.ndarray
     max_cube_z: float
     final_gripper_qpos: np.ndarray
     lifted: bool
+
+
+def cube_center_from_target_surface(
+    target_surface_world: np.ndarray,
+    *,
+    cube_half_height: float = CUBE_HALF_SIZE[2],
+) -> np.ndarray:
+    target = np.asarray(target_surface_world, dtype=float)
+    if target.shape != (3,):
+        raise ValueError(f"Expected target_surface_world shape (3,), got {target.shape}")
+    return target - np.array([0.0, 0.0, float(cube_half_height)], dtype=float)
 
 
 def solve_pick_trajectory(cube_center: np.ndarray = np.array(CUBE_CENTER, dtype=float)) -> PickTrajectory:
@@ -54,22 +112,96 @@ def solve_pick_trajectory(cube_center: np.ndarray = np.array(CUBE_CENTER, dtype=
     return PickTrajectory(READY_Q.copy(), q_above, q_grasp, q_lift)
 
 
+def plan_pick_trajectory_from_target_3d(
+    target_surface_world: np.ndarray,
+    *,
+    shortcut: bool = True,
+    max_joint_velocity: float = 0.8,
+    max_joint_acceleration: float = 1.6,
+) -> PlannedPickTrajectory:
+    target = np.asarray(target_surface_world, dtype=float)
+    cube_center = cube_center_from_target_surface(target)
+    poses = solve_pick_trajectory(cube_center)
+    robot = dobot_cr5_simplified()
+    checker = MujocoCollisionChecker(
+        write_planning_model(),
+        robot,
+        ignored_geom_names=("target_sphere", "target_sphere_b"),
+    )
+    singularity = SingularityChecker(robot)
+
+    def state_valid(q: np.ndarray) -> bool:
+        return checker.is_state_valid(q) and singularity.is_state_valid(q)
+
+    config = RRTConnectConfig(
+        max_iterations=2500,
+        step_size=0.12,
+        edge_resolution=0.04,
+        goal_sample_rate=0.15,
+        rng_seed=31,
+    )
+    return PlannedPickTrajectory(
+        target_surface_world=target,
+        cube_center=cube_center,
+        poses=poses,
+        ready_to_above=_plan_segment(
+            "ready_to_above",
+            robot,
+            poses.q_ready,
+            poses.q_above,
+            state_valid,
+            config,
+            shortcut=shortcut,
+            max_joint_velocity=max_joint_velocity,
+            max_joint_acceleration=max_joint_acceleration,
+        ),
+        above_to_grasp=_plan_segment(
+            "above_to_grasp",
+            robot,
+            poses.q_above,
+            poses.q_grasp,
+            state_valid,
+            config,
+            shortcut=shortcut,
+            max_joint_velocity=max_joint_velocity,
+            max_joint_acceleration=max_joint_acceleration,
+        ),
+        grasp_to_lift=_plan_segment(
+            "grasp_to_lift",
+            robot,
+            poses.q_grasp,
+            poses.q_lift,
+            state_valid,
+            config,
+            shortcut=shortcut,
+            max_joint_velocity=max_joint_velocity,
+            max_joint_acceleration=max_joint_acceleration,
+        ),
+    )
+
+
 def simulate_pick(
     model_path: Path,
     *,
     frames: int = 160,
     fps: int = 20,
+    trajectory: PickTrajectory | None = None,
+    planned_trajectory: PlannedPickTrajectory | None = None,
 ) -> PickSimulationResult:
     model = mujoco.MjModel.from_xml_path(str(model_path))
     data = mujoco.MjData(model)
-    trajectory = solve_pick_trajectory()
+    if trajectory is not None and planned_trajectory is not None:
+        raise ValueError("Pass either trajectory or planned_trajectory, not both.")
+    if trajectory is None and planned_trajectory is None:
+        trajectory = solve_pick_trajectory()
+    q_ready = planned_trajectory.poses.q_ready if planned_trajectory is not None else trajectory.q_ready
 
     qpos0 = model.qpos0.copy()
     data.qpos[:] = qpos0
-    data.qpos[:ROBOT_DOF] = trajectory.q_ready
+    data.qpos[:ROBOT_DOF] = q_ready
     data.qpos[ROBOT_DOF : ROBOT_DOF + GRIPPER_DOF] = GRIPPER_OPEN_QPOS
     data.ctrl[:] = 0.0
-    data.ctrl[:ROBOT_DOF] = trajectory.q_ready
+    data.ctrl[:ROBOT_DOF] = q_ready
     data.ctrl[ROBOT_DOF : ROBOT_DOF + GRIPPER_DOF] = GRIPPER_OPEN_QPOS
     mujoco.mj_forward(model, data)
 
@@ -80,7 +212,10 @@ def simulate_pick(
     steps_per_frame = max(1, int(round(1.0 / (fps * model.opt.timestep))))
     for frame_index in range(frames):
         sim_time = frame_index / fps
-        q_des, gripper_des = command_at_time(trajectory, sim_time)
+        if planned_trajectory is None:
+            q_des, gripper_des = command_at_time(trajectory, sim_time)
+        else:
+            q_des, gripper_des = planned_command_at_time(planned_trajectory, sim_time)
         for _ in range(steps_per_frame):
             data.ctrl[:ROBOT_DOF] = q_des
             data.ctrl[ROBOT_DOF : ROBOT_DOF + GRIPPER_DOF] = gripper_des
@@ -99,6 +234,33 @@ def simulate_pick(
     )
 
 
+def planned_command_at_time(planned: PlannedPickTrajectory, t: float) -> tuple[np.ndarray, float]:
+    if t < PLANNED_PICK_READY_DWELL_SECONDS:
+        return planned.poses.q_ready, GRIPPER_OPEN_QPOS
+
+    t -= PLANNED_PICK_READY_DWELL_SECONDS
+    if t < planned.ready_to_above.trajectory.duration:
+        q, _, _ = planned.ready_to_above.trajectory.sample(t)
+        return q, GRIPPER_OPEN_QPOS
+
+    t -= planned.ready_to_above.trajectory.duration
+    if t < planned.above_to_grasp.trajectory.duration:
+        q, _, _ = planned.above_to_grasp.trajectory.sample(t)
+        return q, GRIPPER_OPEN_QPOS
+
+    t -= planned.above_to_grasp.trajectory.duration
+    if t < PLANNED_PICK_CLOSE_SECONDS:
+        close_alpha = _smoothstep(t / PLANNED_PICK_CLOSE_SECONDS)
+        gripper = (1.0 - close_alpha) * GRIPPER_OPEN_QPOS + close_alpha * GRIPPER_CLOSED_QPOS
+        return planned.poses.q_grasp, float(gripper)
+
+    t -= PLANNED_PICK_CLOSE_SECONDS
+    if t < planned.grasp_to_lift.trajectory.duration:
+        q, _, _ = planned.grasp_to_lift.trajectory.sample(t)
+        return q, GRIPPER_CLOSED_QPOS
+    return planned.poses.q_lift, GRIPPER_CLOSED_QPOS
+
+
 def command_at_time(trajectory: PickTrajectory, t: float) -> tuple[np.ndarray, float]:
     if t < 0.6:
         return trajectory.q_ready, GRIPPER_OPEN_QPOS
@@ -113,6 +275,39 @@ def command_at_time(trajectory: PickTrajectory, t: float) -> tuple[np.ndarray, f
     if t < 5.5:
         return _smooth_joint(trajectory.q_grasp, trajectory.q_lift, (t - 4.0) / 1.5), GRIPPER_CLOSED_QPOS
     return trajectory.q_lift, GRIPPER_CLOSED_QPOS
+
+
+def _plan_segment(
+    name: str,
+    robot,
+    q_start: np.ndarray,
+    q_goal: np.ndarray,
+    state_valid,
+    config: RRTConnectConfig,
+    *,
+    shortcut: bool,
+    max_joint_velocity: float,
+    max_joint_acceleration: float,
+) -> PlannedPickSegment:
+    result = plan_joint_rrt_connect(robot, q_start, q_goal, state_valid, config=config)
+    if not result.success:
+        raise RuntimeError(f"RRT-Connect failed for {name}: {result.reason}")
+    path = result.path
+    if shortcut:
+        path = shortcut_path(path, state_valid, attempts=80, edge_resolution=config.edge_resolution, rng_seed=41)
+    trajectory = parameterize_joint_path(
+        path,
+        max_joint_velocity=max_joint_velocity,
+        max_joint_acceleration=max_joint_acceleration,
+    )
+    return PlannedPickSegment(
+        name=name,
+        raw_path=result.path,
+        path=path,
+        trajectory=trajectory,
+        iterations=result.iterations,
+        reason=result.reason,
+    )
 
 
 def _solve_gripper_center_pose(

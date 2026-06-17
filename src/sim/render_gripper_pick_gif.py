@@ -16,7 +16,10 @@ from src.sim.gripper_model import GRIPPER_OPEN_QPOS
 from src.sim.gripper_pick_motion import (
     GRIPPER_DOF,
     ROBOT_DOF,
+    PickTrajectory,
+    PlannedPickTrajectory,
     command_at_time,
+    planned_command_at_time,
     solve_pick_trajectory,
 )
 from src.sim.gripper_pick_scene import DEFAULT_PICK_MODEL, write_pick_scene_model
@@ -45,18 +48,24 @@ def render_gif(
     frames: int = 160,
     fps: int = 20,
     show_sites: bool = False,
+    trajectory: PickTrajectory | None = None,
+    planned_trajectory: PlannedPickTrajectory | None = None,
 ) -> None:
     model = mujoco.MjModel.from_xml_path(str(model_path))
     data = mujoco.MjData(model)
     renderer = mujoco.Renderer(model, height=height, width=width)
     camera = configure_camera()
-    trajectory = solve_pick_trajectory()
+    if trajectory is not None and planned_trajectory is not None:
+        raise ValueError("Pass either trajectory or planned_trajectory, not both.")
+    if trajectory is None and planned_trajectory is None:
+        trajectory = solve_pick_trajectory()
+    q_ready = planned_trajectory.poses.q_ready if planned_trajectory is not None else trajectory.q_ready
 
     data.qpos[:] = model.qpos0.copy()
-    data.qpos[:ROBOT_DOF] = trajectory.q_ready
+    data.qpos[:ROBOT_DOF] = q_ready
     data.qpos[ROBOT_DOF : ROBOT_DOF + GRIPPER_DOF] = GRIPPER_OPEN_QPOS
     data.ctrl[:] = 0.0
-    data.ctrl[:ROBOT_DOF] = trajectory.q_ready
+    data.ctrl[:ROBOT_DOF] = q_ready
     data.ctrl[ROBOT_DOF : ROBOT_DOF + GRIPPER_DOF] = GRIPPER_OPEN_QPOS
     mujoco.mj_forward(model, data)
 
@@ -69,7 +78,10 @@ def render_gif(
 
     for frame_index in range(frames):
         sim_time = frame_index / fps
-        q_des, gripper_des = command_at_time(trajectory, sim_time)
+        if planned_trajectory is None:
+            q_des, gripper_des = command_at_time(trajectory, sim_time)
+        else:
+            q_des, gripper_des = planned_command_at_time(planned_trajectory, sim_time)
         for _ in range(steps_per_frame):
             data.ctrl[:ROBOT_DOF] = q_des
             data.ctrl[ROBOT_DOF : ROBOT_DOF + GRIPPER_DOF] = gripper_des

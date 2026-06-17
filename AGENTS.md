@@ -115,6 +115,19 @@ Verify VL-style region localization and D435i depth back-projection:
 .venv\Scripts\python src\sim\verify_ark_coding_vl_provider.py
 ```
 
+Verify target_3d grasp-pose generation and RRT-Connect planned picking:
+
+```powershell
+.venv\Scripts\python src\sim\verify_vl_planned_pick.py --provider color_fixture
+```
+
+Optional real-provider validation, only when the selected model supports image
+input:
+
+```powershell
+.venv\Scripts\python src\sim\verify_vl_planned_pick.py --provider ark_coding_vision --model glm-5.2
+```
+
 Run and verify the local CR5 MCP server:
 
 ```powershell
@@ -267,6 +280,7 @@ docs/project_roadmap.md
 docs/phase4_gripper.md
 docs/phase5_d435i_camera.md
 docs/phase6_vl_perception.md
+docs/vl_planned_pick.md
 docs/mcp_robot_server.md
 ```
 
@@ -348,11 +362,15 @@ small numerical contact tolerance for the intended endpoint contact.
   `config/vl_providers.local.json`, using `config/vl_providers.example.json` as
   the template. Real VL providers should return the same region schema and let
   depth/camera geometry compute 3D target points.
+- `target_3d` planned grasping is documented in `docs/vl_planned_pick.md`.
+  The visible surface point from depth is converted to a cube-center estimate,
+  then used to generate top-grasp poses and RRT-Connect planned pick segments.
 - The first local MCP server lives in `src/mcp_robot/server.py`. It exposes
   high-level tools such as `get_robot_capabilities`, `get_scene_state`, and
   `pick_cube`; it also exposes D435i/VL tools such as
   `render_d435i_preview`, `vl_locate_object_region`, `estimate_region_3d`, and
-  `vl_locate_object_3d`. Keep low-level robot logic in `src/robot`,
+  `vl_locate_object_3d`; it also exposes planned picking tools such as
+  `plan_pick_from_target_3d` and `vl_pick_cube`. Keep low-level robot logic in `src/robot`,
   `src/planning`, `src/perception`, and `src/sim`.
 - Keep planning validation aware of Jacobian singularity margins. Current
   thresholds live in `src/planning/singularity.py`.
@@ -399,6 +417,7 @@ Before reporting demo/rendering changes as complete, also run:
 .venv\Scripts\python src\sim\verify_vl_region.py
 .venv\Scripts\python src\sim\verify_openai_vl_provider.py
 .venv\Scripts\python src\sim\verify_ark_coding_vl_provider.py
+.venv\Scripts\python src\sim\verify_vl_planned_pick.py --provider color_fixture
 ```
 
 Before asking for user acceptance, generate or refresh GIFs for every validation

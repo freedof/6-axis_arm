@@ -43,6 +43,8 @@ class RobotMcpServer:
             "simulate_pick_cube": self._simulate_pick_cube,
             "render_pick_cube_gif": self._render_pick_cube_gif,
             "pick_cube": self._pick_cube,
+            "plan_pick_from_target_3d": self._plan_pick_from_target_3d,
+            "vl_pick_cube": self._vl_pick_cube,
         }
 
     def run(self) -> None:
@@ -186,6 +188,39 @@ class RobotMcpServer:
             show_sites=bool(args.get("show_sites", False)),
         )
 
+    def _plan_pick_from_target_3d(self, args: dict[str, Any]) -> dict[str, Any]:
+        return skills.plan_pick_from_target_3d(
+            args["target_3d"],
+            render_gif=bool(args.get("render_gif", True)),
+            output_path=args.get("output_path"),
+            frames=int(args.get("frames", 0)),
+            fps=int(args.get("fps", 20)),
+            width=int(args.get("width", 960)),
+            height=int(args.get("height", 720)),
+            show_sites=bool(args.get("show_sites", False)),
+        )
+
+    def _vl_pick_cube(self, args: dict[str, Any]) -> dict[str, Any]:
+        return skills.vl_pick_cube(
+            str(args.get("prompt", "pick the red block")),
+            args.get("output_dir"),
+            provider=str(args.get("provider", "color_fixture")),
+            manual_region=args.get("manual_region"),
+            model=args.get("model"),
+            config_path=args.get("config_path"),
+            camera_width=int(args.get("camera_width", 424)),
+            camera_height=int(args.get("camera_height", 240)),
+            seed=int(args.get("seed", 7)),
+            pose=str(args.get("pose", "scan")),
+            render_gif=bool(args.get("render_gif", True)),
+            output_path=args.get("output_path"),
+            frames=int(args.get("frames", 0)),
+            fps=int(args.get("fps", 20)),
+            width=int(args.get("width", 960)),
+            height=int(args.get("height", 720)),
+            show_sites=bool(args.get("show_sites", False)),
+        )
+
     def _tool_specs(self) -> list[dict[str, Any]]:
         return [
             {
@@ -291,6 +326,26 @@ class RobotMcpServer:
                     }
                 ),
             },
+            {
+                "name": "plan_pick_from_target_3d",
+                "description": "Convert target_3d into top-grasp poses, plan RRT-Connect pick segments, simulate the pick, and optionally render a GIF.",
+                "inputSchema": _object_schema(
+                    {
+                        "target_3d": {
+                            "description": "Either a target_3d object containing center_world_m or a 3-element world coordinate array.",
+                            "oneOf": [{"type": "object"}, {"type": "array"}],
+                        },
+                        **_render_schema(default_frames=0, minimum_frames=0)["properties"],
+                        "render_gif": {"type": "boolean", "default": True},
+                    },
+                    required=["target_3d"],
+                ),
+            },
+            {
+                "name": "vl_pick_cube",
+                "description": "Run D435i RGB-D capture, VL localization, depth back-projection, target_3d grasp-pose generation, RRT-Connect planning, simulation, and optional GIF rendering.",
+                "inputSchema": _vl_pick_schema(),
+            },
         ]
 
     def _ok(self, request_id: Any, result: dict[str, Any]) -> dict[str, Any]:
@@ -338,15 +393,42 @@ def _vl_observation_schema() -> dict[str, Any]:
     )
 
 
-def _render_schema() -> dict[str, Any]:
+def _render_schema(default_frames: int = 160, minimum_frames: int = 1) -> dict[str, Any]:
     return _object_schema(
         {
             "output_path": {"type": "string"},
-            "frames": {"type": "integer", "default": 160, "minimum": 1},
+            "frames": {"type": "integer", "default": default_frames, "minimum": minimum_frames},
             "fps": {"type": "integer", "default": 20, "minimum": 1},
             "width": {"type": "integer", "default": 960, "minimum": 1},
             "height": {"type": "integer", "default": 720, "minimum": 1},
             "show_sites": {"type": "boolean", "default": False},
+        }
+    )
+
+
+def _vl_pick_schema() -> dict[str, Any]:
+    return _object_schema(
+        {
+            "prompt": {"type": "string", "default": "pick the red block"},
+            "provider": {
+                "type": "string",
+                "default": "color_fixture",
+                "enum": ["color_fixture", "manual_region", "openai_vision", "ark_coding_vision"],
+            },
+            "manual_region": {"type": "object"},
+            "model": {"type": "string"},
+            "config_path": {"type": "string"},
+            "output_dir": {"type": "string"},
+            "camera_width": {"type": "integer", "default": 424, "minimum": 1},
+            "camera_height": {"type": "integer", "default": 240, "minimum": 1},
+            "seed": {"type": "integer", "default": 7},
+            "pose": {
+                "type": "string",
+                "default": "scan",
+                "enum": ["ready", "above", "grasp", "lift", "scan"],
+            },
+            **_render_schema(default_frames=0, minimum_frames=0)["properties"],
+            "render_gif": {"type": "boolean", "default": True},
         }
     )
 
