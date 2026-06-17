@@ -224,9 +224,10 @@ VL 识别需要相机看到足够完整的目标。原来的 `grasp` 姿态太�
 ```
 
 `scan` 会把夹爪根部相机移动到方块上方更适合观察的位置，主要用于视觉定位和 VL 验证。
-当前 `scan` 系列姿态会比早期版本抬得更高：默认 `scan`、`scan_left`、`scan_right`
-等视角相对方块中心约高 `0.30 m`，`scan_high` 约高 `0.38 m`。这样可以减小桌面
-透视和阴影对 VL bbox 的干扰，让红色方块在图中更接近俯视形状。
+当前多视角默认采用真正的高位俯视/斜俯视组合：`scan_high` 位于方块正上方，
+`scan_front_high`、`scan_left_high`、`scan_right_high` 相对方块中心约偏移 `0.055 m`，
+并保持约 `0.38 m` 的高度。这样可以减小桌面透视和阴影对 VL bbox 的干扰，
+同时让 VL 从不同斜上方观察同一个红色方块。
 
 ## 自动验证
 
@@ -324,7 +325,7 @@ overlay 图
   "prompt": "pick the red block",
   "provider": "ark_coding_vision",
   "model": "doubao-seed-2.0-pro",
-  "poses": ["scan", "scan_left", "scan_right", "scan_high"],
+  "poses": ["scan_high", "scan_front_high", "scan_left_high", "scan_right_high"],
   "max_parallel_vl": 4
 }
 ```

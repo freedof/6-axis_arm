@@ -104,15 +104,16 @@ Use this skill for the `F:\6-axis arm` project when the user asks Codex to find 
      {
        "prompt": "pick the red block",
        "provider": "color_fixture",
-       "poses": ["scan", "scan_left", "scan_right", "scan_high"],
+       "poses": ["scan_high", "scan_front_high", "scan_left_high", "scan_right_high"],
        "max_parallel_vl": 4,
        "render_gif": true
      }
      ```
-     The scan poses are deliberately elevated: `scan`, `scan_left`, and
-     `scan_right` are about 0.30 m above the cube center, while `scan_high` is
-     about 0.38 m above it. Prefer these elevated poses when low-angle
-     perspective makes the VL bbox too large.
+     The default multi-view poses are deliberately elevated: `scan_high` looks
+     from directly above, while `scan_front_high`, `scan_left_high`, and
+     `scan_right_high` observe from about 5.5 cm off-center and 0.38 m above the
+     cube center. Prefer these elevated oblique views when low-angle perspective
+     makes the VL bbox too large.
    - For the user's Ark coding plan:
      ```json
      {

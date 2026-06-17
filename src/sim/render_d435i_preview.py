@@ -29,6 +29,9 @@ SCAN_POSE_OFFSETS: dict[str, np.ndarray] = {
     "scan_left": np.array([-0.075, 0.0, 0.300], dtype=float),
     "scan_right": np.array([0.075, 0.0, 0.300], dtype=float),
     "scan_high": np.array([0.0, 0.0, 0.380], dtype=float),
+    "scan_front_high": np.array([0.0, 0.055, 0.380], dtype=float),
+    "scan_left_high": np.array([-0.055, 0.0, 0.380], dtype=float),
+    "scan_right_high": np.array([0.055, 0.0, 0.380], dtype=float),
 }
 POSE_CHOICES = ("ready", "above", "grasp", "lift", *SCAN_POSE_OFFSETS.keys())
 

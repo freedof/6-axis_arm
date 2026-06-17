@@ -156,7 +156,7 @@ multi_view_vl_pick_cube
   "prompt": "pick the red block",
   "provider": "ark_coding_vision",
   "model": "doubao-seed-2.0-pro",
-  "poses": ["scan", "scan_left", "scan_right", "scan_high"],
+  "poses": ["scan_high", "scan_front_high", "scan_left_high", "scan_right_high"],
   "max_parallel_vl": 4,
   "render_gif": true
 }
@@ -165,9 +165,10 @@ multi_view_vl_pick_cube
 多视角流程会先顺序生成多个 D435i 视角，再并行调用 VL provider。这样远端
 VL 调用不会简单变成 4 倍等待时间。
 
-当前多视角扫描位姿采用更高的拍照位置：`scan`、`scan_left`、`scan_right`
-等视角相对方块中心约高 `0.30 m`，`scan_high` 约高 `0.38 m`。这样可以减少
-低视角下桌面透视、阴影和方块侧面投影导致的 bbox 偏大问题。
+当前多视角扫描位姿采用高位俯视/斜俯视组合：`scan_high` 位于方块正上方，
+`scan_front_high`、`scan_left_high`、`scan_right_high` 相对方块中心约偏移 `0.055 m`，
+并保持约 `0.38 m` 的拍照高度。这样可以减少低视角下桌面透视、阴影和方块侧面投影导致的
+bbox 偏大问题，也更适合后续多方块场景中的跨视角一致性判断。
 
 每个视角都会输出：
 

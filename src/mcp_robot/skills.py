@@ -55,7 +55,7 @@ SCENES: dict[str, dict[str, Any]] = {
 }
 
 
-MULTI_VIEW_DEFAULT_POSES = ("scan", "scan_left", "scan_right", "scan_high")
+MULTI_VIEW_DEFAULT_POSES = ("scan_high", "scan_front_high", "scan_left_high", "scan_right_high")
 
 
 def get_robot_capabilities() -> dict[str, Any]:
