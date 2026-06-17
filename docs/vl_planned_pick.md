@@ -86,12 +86,18 @@ assets/dobot_cr5/mjcf/cr5_planning.xml
 
 ## 执行速度和超调控制
 
-抓取执行默认使用保守速度：
+抓取执行按动作阶段分别限速，而不是使用一个全局慢速参数：
 
 ```text
-max_joint_velocity     = 0.45 rad/s
-max_joint_acceleration = 0.80 rad/s^2
+ready_to_above:  max_joint_velocity = 0.75 rad/s, max_joint_acceleration = 1.40 rad/s^2
+above_to_grasp:  max_joint_velocity = 0.24 rad/s, max_joint_acceleration = 0.45 rad/s^2
+grasp_to_lift:   max_joint_velocity = 0.40 rad/s, max_joint_acceleration = 0.70 rad/s^2
+above dwell:     0.4 s
 ```
+
+其中 `ready_to_above` 保持接近之前版本的起步速度，避免一开始运动到最高点前显得过慢；
+`above_to_grasp` 是从高位下降到抓取点的关键段，单独放慢并在高位短暂停留，用来减少接近
+目标时的“冲”和“过头”感觉。
 
 MuJoCo 仿真和 GIF 渲染时，关节目标会在每个 physics step 按连续时间重新采样，
 而不是只按 GIF 帧率更新。这样可以避免 20Hz 帧率目标造成阶跃追踪，减少机械臂

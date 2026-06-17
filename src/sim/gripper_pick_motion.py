@@ -28,10 +28,15 @@ GRIPPER_DOF = 2
 GRASP_CENTER_OFFSET = 0.072
 GRIPPER_CLOSED_QPOS = 0.0
 PLANNED_PICK_READY_DWELL_SECONDS = 0.6
+PLANNED_PICK_ABOVE_DWELL_SECONDS = 0.4
 PLANNED_PICK_CLOSE_SECONDS = 0.8
 PLANNED_PICK_FINAL_DWELL_SECONDS = 1.0
-PICK_MAX_JOINT_VELOCITY = 0.45
-PICK_MAX_JOINT_ACCELERATION = 0.80
+PICK_TRAVEL_MAX_JOINT_VELOCITY = 0.75
+PICK_TRAVEL_MAX_JOINT_ACCELERATION = 1.40
+PICK_APPROACH_MAX_JOINT_VELOCITY = 0.24
+PICK_APPROACH_MAX_JOINT_ACCELERATION = 0.45
+PICK_LIFT_MAX_JOINT_VELOCITY = 0.40
+PICK_LIFT_MAX_JOINT_ACCELERATION = 0.70
 
 
 @dataclass(frozen=True)
@@ -74,6 +79,7 @@ class PlannedPickTrajectory:
         return (
             PLANNED_PICK_READY_DWELL_SECONDS
             + self.ready_to_above.trajectory.duration
+            + PLANNED_PICK_ABOVE_DWELL_SECONDS
             + self.above_to_grasp.trajectory.duration
             + PLANNED_PICK_CLOSE_SECONDS
             + self.grasp_to_lift.trajectory.duration
@@ -118,8 +124,12 @@ def plan_pick_trajectory_from_target_3d(
     target_surface_world: np.ndarray,
     *,
     shortcut: bool = True,
-    max_joint_velocity: float = PICK_MAX_JOINT_VELOCITY,
-    max_joint_acceleration: float = PICK_MAX_JOINT_ACCELERATION,
+    travel_max_joint_velocity: float = PICK_TRAVEL_MAX_JOINT_VELOCITY,
+    travel_max_joint_acceleration: float = PICK_TRAVEL_MAX_JOINT_ACCELERATION,
+    approach_max_joint_velocity: float = PICK_APPROACH_MAX_JOINT_VELOCITY,
+    approach_max_joint_acceleration: float = PICK_APPROACH_MAX_JOINT_ACCELERATION,
+    lift_max_joint_velocity: float = PICK_LIFT_MAX_JOINT_VELOCITY,
+    lift_max_joint_acceleration: float = PICK_LIFT_MAX_JOINT_ACCELERATION,
 ) -> PlannedPickTrajectory:
     target = np.asarray(target_surface_world, dtype=float)
     cube_center = cube_center_from_target_surface(target)
@@ -152,8 +162,8 @@ def plan_pick_trajectory_from_target_3d(
             state_valid,
             config,
             shortcut=shortcut,
-            max_joint_velocity=max_joint_velocity,
-            max_joint_acceleration=max_joint_acceleration,
+            max_joint_velocity=travel_max_joint_velocity,
+            max_joint_acceleration=travel_max_joint_acceleration,
         ),
         above_to_grasp=_plan_segment(
             "above_to_grasp",
@@ -163,8 +173,8 @@ def plan_pick_trajectory_from_target_3d(
             state_valid,
             config,
             shortcut=shortcut,
-            max_joint_velocity=max_joint_velocity,
-            max_joint_acceleration=max_joint_acceleration,
+            max_joint_velocity=approach_max_joint_velocity,
+            max_joint_acceleration=approach_max_joint_acceleration,
         ),
         grasp_to_lift=_plan_segment(
             "grasp_to_lift",
@@ -174,8 +184,8 @@ def plan_pick_trajectory_from_target_3d(
             state_valid,
             config,
             shortcut=shortcut,
-            max_joint_velocity=max_joint_velocity,
-            max_joint_acceleration=max_joint_acceleration,
+            max_joint_velocity=lift_max_joint_velocity,
+            max_joint_acceleration=lift_max_joint_acceleration,
         ),
     )
 
@@ -244,6 +254,10 @@ def planned_command_at_time(planned: PlannedPickTrajectory, t: float) -> tuple[n
         return q, GRIPPER_OPEN_QPOS
 
     t -= planned.ready_to_above.trajectory.duration
+    if t < PLANNED_PICK_ABOVE_DWELL_SECONDS:
+        return planned.poses.q_above, GRIPPER_OPEN_QPOS
+
+    t -= PLANNED_PICK_ABOVE_DWELL_SECONDS
     if t < planned.above_to_grasp.trajectory.duration:
         q, _, _ = planned.above_to_grasp.trajectory.sample(t)
         return q, GRIPPER_OPEN_QPOS
