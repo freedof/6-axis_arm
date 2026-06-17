@@ -398,9 +398,9 @@ small numerical contact tolerance for the intended endpoint contact.
 - `target_3d` planned grasping is documented in `docs/vl_planned_pick.md`.
   The visible surface point from depth is converted to a cube-center estimate,
   then used to generate top-grasp poses and RRT-Connect planned pick segments.
-  The current gripper-center grasp pose is offset `0.040 m` above the estimated
+  The current gripper-center grasp pose is offset `0.045 m` above the estimated
   cube center to avoid descending too close to the table; with the current
-  simplified gripper geometry, the finger bottom is about `0.008 m` above the
+  simplified gripper geometry, the finger bottom is about `0.013 m` above the
   table at the grasp pose.
 - The first local MCP server lives in `src/mcp_robot/server.py`. It exposes
   high-level tools such as `get_robot_capabilities`, `get_scene_state`, and
