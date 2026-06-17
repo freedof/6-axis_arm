@@ -411,9 +411,12 @@ overlay 图
   "provider": "ark_coding_vision",
   "model": "doubao-seed-2.0-pro",
   "poses": ["scan_high", "scan_front_high", "scan_left_high", "scan_right_high"],
-  "max_parallel_vl": 4
+  "max_parallel_vl": 4,
+  "depth_variant": "raw"
 }
 ```
+
+`depth_variant` 默认使用 `raw`，用于保持确定性验证稳定；需要验证 D435i 噪声和 dropout 对抓取闭环的影响时，改为 `noisy`。
 
 多视角工具会先生成多个 D435i 视角，再并行调用 VL provider。每个视角都会
 得到 bbox 和 target_3d，随后做几何筛选和 3D 空间聚类，只融合落在同一目标簇

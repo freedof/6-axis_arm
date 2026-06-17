@@ -60,6 +60,7 @@ def main() -> None:
     parser.add_argument("--frames", type=int, default=0, help="0 means derive frames from planned playback duration.")
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--pose", default="scan", choices=list(skills.POSE_CHOICES))
+    parser.add_argument("--depth-variant", default="raw", choices=list(skills.DEPTH_VARIANTS))
     parser.add_argument("--no-shortcut", action="store_true")
     args = parser.parse_args()
 
@@ -77,6 +78,7 @@ def main() -> None:
         height=args.camera_height,
         seed=args.seed,
         pose=args.pose,
+        depth_variant=args.depth_variant,
     )
     target_surface_world = np.asarray(located["target_3d"]["center_world_m"], dtype=float)
     planned = plan_pick_trajectory_from_target_3d(target_surface_world, shortcut=not args.no_shortcut)
@@ -99,7 +101,9 @@ def main() -> None:
 
     status = "OK" if simulation.lifted else "FAILED"
     print("provider:", args.provider)
+    print("depth_variant:", args.depth_variant)
     print("prompt:", args.prompt)
+    print("depth_file:", located["depth_file"])
     print("rgb:", located["observation"]["files"]["rgb"])
     print("overlay:", located["region"].get("overlay_path"))
     print("bbox_xyxy:", located["region"].get("bbox_xyxy"))

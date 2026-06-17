@@ -47,6 +47,7 @@ def main() -> None:
     parser.add_argument("--gif", type=Path, default=DEFAULT_GIF)
     parser.add_argument("--poses", nargs="+", default=list(skills.MULTI_VIEW_DEFAULT_POSES))
     parser.add_argument("--max-parallel-vl", type=int, default=4)
+    parser.add_argument("--depth-variant", default="raw", choices=list(skills.DEPTH_VARIANTS))
     parser.add_argument("--width", type=int, default=640)
     parser.add_argument("--height", type=int, default=480)
     parser.add_argument("--camera-width", type=int, default=424)
@@ -69,6 +70,7 @@ def main() -> None:
         seed=args.seed,
         poses=args.poses,
         max_parallel_vl=args.max_parallel_vl,
+        depth_variant=args.depth_variant,
         render_gif=True,
         output_path=_resolve_path(args.gif),
         frames=args.frames,
@@ -80,6 +82,7 @@ def main() -> None:
     perception = result.get("perception", {})
     fusion = perception.get("fusion", {})
     print("provider:", args.provider)
+    print("depth_variant:", args.depth_variant)
     print("prompt:", args.prompt)
     print("poses:", args.poses)
     print("fusion:", fusion)
@@ -101,6 +104,8 @@ def _candidate_summary(candidate: dict[str, Any]) -> dict[str, Any]:
         "bbox_xyxy": region.get("bbox_xyxy"),
         "self_check": region.get("self_check"),
         "overlay_path": region.get("overlay_path"),
+        "depth_variant": candidate.get("depth_variant"),
+        "depth_file": candidate.get("depth_file"),
         "center_world_m": target.get("center_world_m"),
         "valid_pixel_count": target.get("valid_pixel_count"),
         "cluster_distance_m": candidate.get("cluster_distance_m"),

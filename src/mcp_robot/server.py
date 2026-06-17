@@ -177,6 +177,7 @@ class RobotMcpServer:
             height=int(args.get("height", 240)),
             seed=int(args.get("seed", 7)),
             pose=str(args.get("pose", "scan")),
+            depth_variant=str(args.get("depth_variant", "raw")),
         )
 
     def _pick_cube(self, args: dict[str, Any]) -> dict[str, Any]:
@@ -221,6 +222,7 @@ class RobotMcpServer:
             width=int(args.get("width", 960)),
             height=int(args.get("height", 720)),
             show_sites=bool(args.get("show_sites", False)),
+            depth_variant=str(args.get("depth_variant", "raw")),
         )
 
     def _multi_view_vl_locate_object_3d(self, args: dict[str, Any]) -> dict[str, Any]:
@@ -237,6 +239,7 @@ class RobotMcpServer:
             poses=args.get("poses", skills.MULTI_VIEW_DEFAULT_POSES),
             max_parallel_vl=int(args.get("max_parallel_vl", 4)),
             min_accepted_views=int(args.get("min_accepted_views", 1)),
+            depth_variant=str(args.get("depth_variant", "raw")),
         )
 
     def _multi_view_vl_pick_cube(self, args: dict[str, Any]) -> dict[str, Any]:
@@ -260,6 +263,7 @@ class RobotMcpServer:
             width=int(args.get("width", 960)),
             height=int(args.get("height", 720)),
             show_sites=bool(args.get("show_sites", False)),
+            depth_variant=str(args.get("depth_variant", "raw")),
         )
 
     def _tool_specs(self) -> list[dict[str, Any]]:
@@ -440,6 +444,12 @@ def _vl_observation_schema() -> dict[str, Any]:
                 "default": "scan",
                 "enum": list(skills.POSE_CHOICES),
             },
+            "depth_variant": {
+                "type": "string",
+                "default": "raw",
+                "enum": list(skills.DEPTH_VARIANTS),
+                "description": "Depth image used for 3D lifting: raw_depth or noisy_depth.",
+            },
         }
     )
 
@@ -478,6 +488,12 @@ def _vl_pick_schema() -> dict[str, Any]:
                 "default": "scan",
                 "enum": list(skills.POSE_CHOICES),
             },
+            "depth_variant": {
+                "type": "string",
+                "default": "raw",
+                "enum": list(skills.DEPTH_VARIANTS),
+                "description": "Depth image used for 3D lifting: raw_depth or noisy_depth.",
+            },
             **_render_schema(default_frames=0, minimum_frames=0)["properties"],
             "render_gif": {"type": "boolean", "default": True},
         }
@@ -509,6 +525,12 @@ def _multi_view_vl_schema(*, include_render: bool) -> dict[str, Any]:
         },
         "max_parallel_vl": {"type": "integer", "default": 4, "minimum": 1},
         "min_accepted_views": {"type": "integer", "default": 1, "minimum": 1},
+        "depth_variant": {
+            "type": "string",
+            "default": "raw",
+            "enum": list(skills.DEPTH_VARIANTS),
+            "description": "Depth image used for 3D lifting: raw_depth or noisy_depth.",
+        },
     }
     if include_render:
         properties = {

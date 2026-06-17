@@ -58,6 +58,7 @@ SCENES: dict[str, dict[str, Any]] = {
 
 MULTI_VIEW_DEFAULT_POSES = ("scan_high", "scan_front_high", "scan_left_high", "scan_right_high")
 VL_PROVIDERS = ("color_fixture", "manual_region", "codex_vision", "openai_vision", "ark_coding_vision", "openrouter_vision")
+DEPTH_VARIANTS = ("raw", "noisy")
 
 
 def get_robot_capabilities() -> dict[str, Any]:
@@ -396,7 +397,9 @@ def vl_locate_object_3d(
     height: int = 240,
     seed: int = 7,
     pose: str = "scan",
+    depth_variant: str = "raw",
 ) -> dict[str, Any]:
+    depth_file_key = _depth_file_key(depth_variant)
     located = vl_locate_object_region(
         prompt,
         output_dir,
@@ -412,7 +415,7 @@ def vl_locate_object_3d(
     observation = located["observation"]
     estimate = estimate_region_3d(
         region=located["region"],
-        depth_path=observation["files"]["raw_depth"],
+        depth_path=observation["files"][depth_file_key],
         intrinsics=observation["intrinsics"],
         extrinsic_world_to_camera=observation["extrinsic_world_to_camera"],
     )
@@ -421,6 +424,8 @@ def vl_locate_object_3d(
         "scene_id": "gripper_pick_cube_d435i",
         "prompt": prompt,
         "provider": provider,
+        "depth_variant": depth_variant,
+        "depth_file": observation["files"][depth_file_key],
         "observation": observation,
         "region": located["region"],
         "target_3d": estimate["target_3d"],
@@ -446,9 +451,11 @@ def multi_view_vl_locate_object_3d(
     max_surface_z_m: float = 0.140,
     max_cluster_radius_m: float = 0.040,
     min_accepted_views: int = 1,
+    depth_variant: str = "raw",
 ) -> dict[str, Any]:
     if provider not in VL_PROVIDERS:
         raise ValueError(f"Unknown VL provider: {provider}")
+    depth_file_key = _depth_file_key(depth_variant)
     selected_poses = tuple(str(pose) for pose in poses)
     for pose in selected_poses:
         if pose not in POSE_CHOICES:
@@ -480,6 +487,8 @@ def multi_view_vl_locate_object_3d(
                 manual_region=(manual_regions or {}).get(pose) if manual_regions else None,
                 model=model,
                 config_path=config_path,
+                depth_file_key=depth_file_key,
+                depth_variant=depth_variant,
             ): pose
             for index, pose in enumerate(selected_poses)
         }
@@ -514,6 +523,7 @@ def multi_view_vl_locate_object_3d(
             "scene_id": "gripper_pick_cube_d435i",
             "prompt": prompt,
             "provider": provider,
+            "depth_variant": depth_variant,
             "poses": list(selected_poses),
             "candidates": candidates,
             "fusion": {
@@ -528,6 +538,7 @@ def multi_view_vl_locate_object_3d(
             "scene_id": "gripper_pick_cube_d435i",
             "prompt": prompt,
             "provider": provider,
+            "depth_variant": depth_variant,
             "poses": list(selected_poses),
             "candidates": candidates,
             "fusion": {
@@ -552,6 +563,7 @@ def multi_view_vl_locate_object_3d(
         "scene_id": "gripper_pick_cube_d435i",
         "prompt": prompt,
         "provider": provider,
+        "depth_variant": depth_variant,
         "poses": list(selected_poses),
         "candidates": candidates,
         "fusion": {
@@ -734,6 +746,7 @@ def vl_pick_cube(
     width: int = 960,
     height: int = 720,
     show_sites: bool = False,
+    depth_variant: str = "raw",
 ) -> dict[str, Any]:
     located = vl_locate_object_3d(
         prompt,
@@ -746,6 +759,7 @@ def vl_pick_cube(
         height=camera_height,
         seed=seed,
         pose=pose,
+        depth_variant=depth_variant,
     )
     target_surface_world = _target_3d_center(located["target_3d"])
     planned = plan_pick_trajectory_from_target_3d(target_surface_world)
@@ -767,6 +781,8 @@ def vl_pick_cube(
     response["perception"] = {
         "provider": provider,
         "prompt": prompt,
+        "depth_variant": located["depth_variant"],
+        "depth_file": located["depth_file"],
         "observation": located["observation"],
         "region": located["region"],
         "target_3d": located["target_3d"],
@@ -818,6 +834,7 @@ def multi_view_vl_pick_cube(
     width: int = 960,
     height: int = 720,
     show_sites: bool = False,
+    depth_variant: str = "raw",
 ) -> dict[str, Any]:
     located = multi_view_vl_locate_object_3d(
         prompt,
@@ -832,6 +849,7 @@ def multi_view_vl_pick_cube(
         poses=poses,
         max_parallel_vl=max_parallel_vl,
         min_accepted_views=min_accepted_views,
+        depth_variant=depth_variant,
     )
     if located["status"] != "ok":
         return {
@@ -907,6 +925,8 @@ def _multi_view_candidate(
     manual_region: dict[str, Any] | None,
     model: str | None,
     config_path: str | Path | None,
+    depth_file_key: str,
+    depth_variant: str,
 ) -> dict[str, Any]:
     region = _locate_region_from_observation(
         prompt=prompt,
@@ -918,7 +938,7 @@ def _multi_view_candidate(
         config_path=config_path,
         overlay_name=f"{pose}_vl_region_overlay.png",
     )
-    depth_path = Path(observation["files"]["raw_depth"])
+    depth_path = Path(observation["files"][depth_file_key])
     if not depth_path.is_absolute():
         depth_path = ROOT / depth_path
     estimate3d = estimate_vl_region_3d(
@@ -934,6 +954,8 @@ def _multi_view_candidate(
         "accepted": False,
         "reject_reason": "not_scored",
         "observation": observation,
+        "depth_variant": depth_variant,
+        "depth_file": _relative(depth_path),
         "region": region,
         "target_3d": region3d_to_dict(estimate3d),
     }
@@ -1096,6 +1118,13 @@ def _target_3d_center(target_3d: dict[str, Any] | list[float]) -> np.ndarray:
     if target.shape != (3,):
         raise ValueError(f"target_3d must contain a 3D center_world_m, got shape {target.shape}")
     return target
+
+
+def _depth_file_key(depth_variant: str) -> str:
+    normalized = str(depth_variant).strip().lower()
+    if normalized not in DEPTH_VARIANTS:
+        raise ValueError(f"Unknown depth_variant: {depth_variant}. Expected one of {DEPTH_VARIANTS}.")
+    return f"{normalized}_depth"
 
 
 def _round_vector(values: np.ndarray) -> list[float]:

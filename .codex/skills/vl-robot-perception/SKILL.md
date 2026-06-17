@@ -96,6 +96,7 @@ Use this skill for the `F:\6-axis arm` project when the user asks Codex to find 
        "prompt": "pick the red block",
        "provider": "color_fixture",
        "pose": "scan",
+       "depth_variant": "raw",
        "render_gif": true
      }
      ```
@@ -108,6 +109,7 @@ Use this skill for the `F:\6-axis arm` project when the user asks Codex to find 
        "provider": "color_fixture",
        "poses": ["scan_high", "scan_front_high", "scan_left_high", "scan_right_high"],
        "max_parallel_vl": 4,
+       "depth_variant": "raw",
        "render_gif": true
      }
      ```
@@ -208,9 +210,11 @@ reason: config/vl_providers.local.json is missing or openrouter_vision.api_key i
   views first, calls the VL provider in parallel, rejects table-height or
   inconsistent 3D candidates, and fuses only candidates in the same 3D cluster.
   External VL providers such as `openai_vision`, `ark_coding_vision`, and
-  `openrouter_vision` require
-  at least two accepted views before grasp planning; a single accepted view is
-  reported as unreliable perception.
+  `openrouter_vision` require at least two accepted views before grasp
+  planning; a single accepted view is reported as unreliable perception.
+- Use `depth_variant: "noisy"` when the task is to validate robustness under
+  simulated D435i depth noise/dropout. The default remains `raw` so existing
+  deterministic checks stay stable.
 - In multi-object scenes with same-shaped cubes, make the prompt identify the
   intended object by color, spatial relation, or task role. Do not average
   candidates from different 3D clusters; report ambiguity instead.
