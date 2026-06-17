@@ -38,13 +38,13 @@ CUBE_HALF_SIZE[2] = 0.030 m
 
 ```text
 above: 位于方块中心上方 0.120 m
-grasp: 夹爪中心位于方块中心上方 0.050 m，避免下降过深接近桌面
+grasp: 夹爪中心位于方块中心上方 0.070 m，避免下降过深接近桌面
 lift:  位于方块中心上方 0.150 m
 ```
 
 这些姿态仍然通过现有 IK 求解，夹爪采用当前简化平行夹爪。姿态约束为自上而下抓取。
 当前抓取点会夹住方块上半部，而不是让夹爪中心下降到方块几何中心。按当前简化夹爪
-几何，抓取姿态下手指最低点约高于桌面 `0.018 m`。
+几何，抓取姿态下手指最低点约高于桌面 `0.038 m`。
 
 ## RRT-Connect 规划
 
@@ -92,7 +92,7 @@ assets/dobot_cr5/mjcf/cr5_planning.xml
 
 ```text
 ready_to_above:  max_joint_velocity = 0.75 rad/s, max_joint_acceleration = 1.40 rad/s^2
-above_to_grasp:  max_joint_velocity = 0.18 rad/s, max_joint_acceleration = 0.32 rad/s^2
+above_to_grasp:  max_joint_velocity = 0.10 rad/s, max_joint_acceleration = 0.18 rad/s^2
 grasp_to_lift:   max_joint_velocity = 0.40 rad/s, max_joint_acceleration = 0.70 rad/s^2
 above dwell:     0.4 s
 ```

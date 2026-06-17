@@ -168,10 +168,10 @@ reason: config/vl_providers.local.json is missing or ark_coding_vision.api_key i
 - Treat `target_3d.center_world_m` as a visible-surface target estimate, not a final grasp pose.
 - Convert the 3D target into a grasp pose before planning.
 - For the current cube scene, convert the visible top-surface target into a cube-center estimate before top grasping.
-- The current top-grasp pose keeps the gripper center about 0.050 m above the
+- The current top-grasp pose keeps the gripper center about 0.070 m above the
   estimated cube center so the gripper does not descend unnecessarily close to
   the table. With the current simplified gripper geometry, the finger bottom is
-  about 0.018 m above the table at the grasp pose.
+  about 0.038 m above the table at the grasp pose.
 - Prefer `vl_pick_cube` when the user wants the full instruction -> D435i -> VL -> depth -> RRT-Connect -> pick flow.
 - Prefer `multi_view_vl_pick_cube` when robustness matters. It renders multiple
   views first, calls the VL provider in parallel, rejects table-height or
