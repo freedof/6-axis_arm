@@ -213,25 +213,29 @@ def locate_ark_coding_vision_region(
         f"Target request: {prompt}. "
         "Return strict JSON only."
     )
-    payload = {
-        "model": selected_model,
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": instructions + "\n" + user_text},
-                    {"type": "image_url", "image_url": {"url": image_url}},
-                ],
-            }
-        ],
-        "temperature": 0,
-    }
-    response = _post_json(endpoint, payload, api_key=key, timeout_s=timeout_s, provider_name="Ark coding vision")
-    raw_region = json.loads(_extract_chat_completion_text(response))
+    raw_region = _locate_ark_region_with_retry(
+        endpoint=endpoint,
+        api_key=key,
+        model=selected_model,
+        image_url=image_url,
+        instructions=instructions,
+        user_text=user_text,
+        timeout_s=timeout_s,
+    )
     normalized = _normalize_region(raw_region, prompt=prompt, provider="ark_coding_vision", image_size=(width, height))
     normalized["model"] = selected_model
     normalized["base_url"] = endpoint.rsplit("/chat/completions", 1)[0]
     normalized["config_path"] = str(config_file)
+    normalized = _review_ark_region(
+        endpoint=endpoint,
+        api_key=key,
+        model=selected_model,
+        image_url=image_url,
+        prompt=prompt,
+        image_size=(width, height),
+        region=normalized,
+        timeout_s=timeout_s,
+    )
     if output_path is not None:
         overlay_path = _draw_region_overlay(rgb_path, normalized, output_path, label="Ark VL")
         normalized["overlay_path"] = str(overlay_path)
@@ -449,6 +453,124 @@ def _robot_vl_localization_instructions(*, json_only: bool = False) -> str:
         "Prefer a smaller precise bbox over a large bbox that includes table/background. "
         "If multiple similar objects are visible, choose the one matching the user's color, spatial relation, or task wording, and explain that choice in reasoning."
     )
+
+
+def _review_ark_region(
+    *,
+    endpoint: str,
+    api_key: str,
+    model: str,
+    image_url: str,
+    prompt: str,
+    image_size: tuple[int, int],
+    region: dict[str, Any],
+    timeout_s: float,
+) -> dict[str, Any]:
+    """Ask the VL provider to verify or correct its own bbox."""
+    width, height = image_size
+    initial_bbox = list(region["bbox_xyxy"])
+    instructions = (
+        "You are reviewing a candidate bbox for robot visual grounding. "
+        "Inspect the image and decide whether the candidate bbox tightly covers the visible body of the requested target object. "
+        "The target may be small. The bbox must not cover mostly table, floor, background, gripper, shadows, highlights, or empty borders. "
+        "If the candidate is wrong but the requested target is visible, provide a corrected tight bbox. "
+        "If the requested target is not visible, return valid_bbox=false and corrected_bbox_xyxy=[]. "
+        "Return strict JSON only with keys: valid_bbox, corrected_bbox_xyxy, confidence, reasoning."
+    )
+    user_text = (
+        f"Image size: width={width}, height={height}. "
+        f"Target request: {prompt}. "
+        f"Candidate bbox_xyxy: {initial_bbox}. "
+        "Review the candidate bbox."
+    )
+    payload = {
+        "model": model,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": instructions + "\n" + user_text},
+                    {"type": "image_url", "image_url": {"url": image_url}},
+                ],
+            }
+        ],
+        "temperature": 0,
+    }
+    response = _post_json(endpoint, payload, api_key=api_key, timeout_s=timeout_s, provider_name="Ark coding vision self-check")
+    review = json.loads(_extract_chat_completion_text(response))
+    valid = bool(review.get("valid_bbox", False))
+    corrected = review.get("corrected_bbox_xyxy", [])
+    if isinstance(corrected, list) and len(corrected) == 4:
+        reviewed = {
+            "type": "bbox",
+            "label": region.get("label", "target_object"),
+            "bbox_xyxy": corrected,
+            "confidence": float(review.get("confidence", region.get("confidence", 0.5))),
+            "reasoning": str(review.get("reasoning", "")),
+        }
+        normalized = _normalize_region(reviewed, prompt=prompt, provider="ark_coding_vision", image_size=image_size)
+        normalized["model"] = region.get("model", model)
+        normalized["base_url"] = region.get("base_url")
+        normalized["config_path"] = region.get("config_path")
+        normalized["self_check"] = {
+            "initial_bbox_xyxy": initial_bbox,
+            "valid_bbox": valid,
+            "corrected": corrected != initial_bbox,
+            "confidence": normalized["confidence"],
+            "reasoning": str(review.get("reasoning", "")),
+        }
+        return normalized
+    review_confidence = float(review.get("confidence", region.get("confidence", 0.5)))
+    region["self_check"] = {
+        "initial_bbox_xyxy": initial_bbox,
+        "valid_bbox": valid,
+        "corrected": False,
+        "confidence": review_confidence,
+        "reasoning": str(review.get("reasoning", "")),
+    }
+    if valid:
+        region["confidence"] = round(float(np.clip(review_confidence, 0.0, 1.0)), 4)
+    return region
+
+
+def _locate_ark_region_with_retry(
+    *,
+    endpoint: str,
+    api_key: str,
+    model: str,
+    image_url: str,
+    instructions: str,
+    user_text: str,
+    timeout_s: float,
+    attempts: int = 2,
+) -> dict[str, Any]:
+    last_error: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        retry_text = user_text
+        if attempt > 1:
+            retry_text += (
+                " Retry carefully: the target is a small physical tabletop object, not the table/background. "
+                "Return your best tight bbox around the visible target body."
+            )
+        payload = {
+            "model": model,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": instructions + "\n" + retry_text},
+                        {"type": "image_url", "image_url": {"url": image_url}},
+                    ],
+                }
+            ],
+            "temperature": 0,
+        }
+        try:
+            response = _post_json(endpoint, payload, api_key=api_key, timeout_s=timeout_s, provider_name="Ark coding vision")
+            return json.loads(_extract_chat_completion_text(response))
+        except Exception as exc:
+            last_error = exc
+    raise RuntimeError(f"Ark coding vision failed after {attempts} attempts: {last_error}") from last_error
 
 
 def _post_openai_response(payload: dict[str, Any], *, api_key: str, timeout_s: float) -> dict[str, Any]:

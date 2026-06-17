@@ -425,6 +425,7 @@ def multi_view_vl_locate_object_3d(
     min_surface_z_m: float | None = None,
     max_surface_z_m: float = 0.140,
     max_cluster_radius_m: float = 0.040,
+    min_accepted_views: int = 1,
 ) -> dict[str, Any]:
     if provider not in VL_PROVIDERS:
         raise ValueError(f"Unknown VL provider: {provider}")
@@ -486,6 +487,7 @@ def multi_view_vl_locate_object_3d(
         max_cluster_radius_m=max_cluster_radius_m,
     )
     accepted = [candidate for candidate in candidates if candidate["accepted"]]
+    required_accepted = max(int(min_accepted_views), 2 if provider in ("openai_vision", "ark_coding_vision") else 1)
     if not accepted:
         return {
             "status": "failed",
@@ -498,6 +500,23 @@ def multi_view_vl_locate_object_3d(
                 "accepted_count": 0,
                 "rejected_count": len(candidates),
                 "reason": "no multi-view candidates passed geometry and consistency checks",
+            },
+        }
+    if len(accepted) < required_accepted:
+        return {
+            "status": "failed",
+            "scene_id": "gripper_pick_cube_d435i",
+            "prompt": prompt,
+            "provider": provider,
+            "poses": list(selected_poses),
+            "candidates": candidates,
+            "fusion": {
+                "accepted_count": len(accepted),
+                "rejected_count": len(candidates) - len(accepted),
+                "used_views": [candidate["pose"] for candidate in accepted],
+                "rejected_views": [candidate["pose"] for candidate in candidates if not candidate["accepted"]],
+                "required_accepted_views": required_accepted,
+                "reason": "not enough accepted views for reliable external-VL grasp planning",
             },
         }
 
@@ -528,6 +547,7 @@ def multi_view_vl_locate_object_3d(
                 "min_surface_z_m": round(float(min_z), 6),
                 "max_surface_z_m": round(float(max_surface_z_m), 6),
                 "max_cluster_radius_m": round(float(max_cluster_radius_m), 6),
+                "min_accepted_views": int(required_accepted),
             },
         },
     }
@@ -770,6 +790,7 @@ def multi_view_vl_pick_cube(
     seed: int = 7,
     poses: list[str] | tuple[str, ...] = MULTI_VIEW_DEFAULT_POSES,
     max_parallel_vl: int = 4,
+    min_accepted_views: int = 1,
     render_gif: bool = True,
     output_path: str | Path | None = None,
     frames: int = 0,
@@ -790,6 +811,7 @@ def multi_view_vl_pick_cube(
         seed=seed,
         poses=poses,
         max_parallel_vl=max_parallel_vl,
+        min_accepted_views=min_accepted_views,
     )
     if located["status"] != "ok":
         return {
@@ -910,7 +932,11 @@ def _score_multi_view_candidates(
         reasons = []
         target = candidate.get("target_3d")
         if not isinstance(target, dict):
-            reasons.append("missing_target_3d")
+            existing_reason = str(candidate.get("reject_reason", ""))
+            if existing_reason and existing_reason != "not_scored":
+                reasons.append(existing_reason)
+            else:
+                reasons.append("missing_target_3d")
         else:
             valid_pixels = int(target.get("valid_pixel_count", 0))
             center = np.asarray(target.get("center_world_m", []), dtype=float)

@@ -236,6 +236,7 @@ class RobotMcpServer:
             seed=int(args.get("seed", 7)),
             poses=args.get("poses", skills.MULTI_VIEW_DEFAULT_POSES),
             max_parallel_vl=int(args.get("max_parallel_vl", 4)),
+            min_accepted_views=int(args.get("min_accepted_views", 1)),
         )
 
     def _multi_view_vl_pick_cube(self, args: dict[str, Any]) -> dict[str, Any]:
@@ -251,6 +252,7 @@ class RobotMcpServer:
             seed=int(args.get("seed", 7)),
             poses=args.get("poses", skills.MULTI_VIEW_DEFAULT_POSES),
             max_parallel_vl=int(args.get("max_parallel_vl", 4)),
+            min_accepted_views=int(args.get("min_accepted_views", 1)),
             render_gif=bool(args.get("render_gif", True)),
             output_path=args.get("output_path"),
             frames=int(args.get("frames", 0)),
@@ -506,6 +508,7 @@ def _multi_view_vl_schema(*, include_render: bool) -> dict[str, Any]:
             "default": list(skills.MULTI_VIEW_DEFAULT_POSES),
         },
         "max_parallel_vl": {"type": "integer", "default": 4, "minimum": 1},
+        "min_accepted_views": {"type": "integer", "default": 1, "minimum": 1},
     }
     if include_render:
         properties = {

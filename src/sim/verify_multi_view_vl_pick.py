@@ -99,6 +99,7 @@ def _candidate_summary(candidate: dict[str, Any]) -> dict[str, Any]:
         "accepted": candidate.get("accepted"),
         "reject_reason": candidate.get("reject_reason"),
         "bbox_xyxy": region.get("bbox_xyxy"),
+        "self_check": region.get("self_check"),
         "overlay_path": region.get("overlay_path"),
         "center_world_m": target.get("center_world_m"),
         "valid_pixel_count": target.get("valid_pixel_count"),

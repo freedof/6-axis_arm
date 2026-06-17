@@ -130,6 +130,8 @@ Use this skill for the `F:\6-axis arm` project when the user asks Codex to find 
      short target request: wrist-mounted D435i view, tabletop scene, small
      target allowed, tight bbox only, exclude gripper/table/shadows/background,
      and avoid image-edge corner boxes.
+     Ark localization retries each view up to two times and runs an advisory VL
+     self-check that may correct the bbox before depth lifting.
 
 5. Always report the result as an automatic pre-check, not final grasp acceptance.
    - Include the overlay path.
@@ -182,6 +184,9 @@ reason: config/vl_providers.local.json is missing or ark_coding_vision.api_key i
 - Prefer `multi_view_vl_pick_cube` when robustness matters. It renders multiple
   views first, calls the VL provider in parallel, rejects table-height or
   inconsistent 3D candidates, and fuses only candidates in the same 3D cluster.
+  External VL providers such as `openai_vision` and `ark_coding_vision` require
+  at least two accepted views before grasp planning; a single accepted view is
+  reported as unreliable perception.
 - In multi-object scenes with same-shaped cubes, make the prompt identify the
   intended object by color, spatial relation, or task role. Do not average
   candidates from different 3D clusters; report ambiguity instead.
