@@ -45,6 +45,8 @@ class RobotMcpServer:
             "pick_cube": self._pick_cube,
             "plan_pick_from_target_3d": self._plan_pick_from_target_3d,
             "vl_pick_cube": self._vl_pick_cube,
+            "multi_view_vl_locate_object_3d": self._multi_view_vl_locate_object_3d,
+            "multi_view_vl_pick_cube": self._multi_view_vl_pick_cube,
         }
 
     def run(self) -> None:
@@ -221,6 +223,43 @@ class RobotMcpServer:
             show_sites=bool(args.get("show_sites", False)),
         )
 
+    def _multi_view_vl_locate_object_3d(self, args: dict[str, Any]) -> dict[str, Any]:
+        return skills.multi_view_vl_locate_object_3d(
+            str(args.get("prompt", "pick the red block")),
+            args.get("output_dir"),
+            provider=str(args.get("provider", "color_fixture")),
+            manual_regions=args.get("manual_regions"),
+            model=args.get("model"),
+            config_path=args.get("config_path"),
+            camera_width=int(args.get("camera_width", 424)),
+            camera_height=int(args.get("camera_height", 240)),
+            seed=int(args.get("seed", 7)),
+            poses=args.get("poses", skills.MULTI_VIEW_DEFAULT_POSES),
+            max_parallel_vl=int(args.get("max_parallel_vl", 4)),
+        )
+
+    def _multi_view_vl_pick_cube(self, args: dict[str, Any]) -> dict[str, Any]:
+        return skills.multi_view_vl_pick_cube(
+            str(args.get("prompt", "pick the red block")),
+            args.get("output_dir"),
+            provider=str(args.get("provider", "color_fixture")),
+            manual_regions=args.get("manual_regions"),
+            model=args.get("model"),
+            config_path=args.get("config_path"),
+            camera_width=int(args.get("camera_width", 424)),
+            camera_height=int(args.get("camera_height", 240)),
+            seed=int(args.get("seed", 7)),
+            poses=args.get("poses", skills.MULTI_VIEW_DEFAULT_POSES),
+            max_parallel_vl=int(args.get("max_parallel_vl", 4)),
+            render_gif=bool(args.get("render_gif", True)),
+            output_path=args.get("output_path"),
+            frames=int(args.get("frames", 0)),
+            fps=int(args.get("fps", 20)),
+            width=int(args.get("width", 960)),
+            height=int(args.get("height", 720)),
+            show_sites=bool(args.get("show_sites", False)),
+        )
+
     def _tool_specs(self) -> list[dict[str, Any]]:
         return [
             {
@@ -273,7 +312,7 @@ class RobotMcpServer:
                         "pose": {
                             "type": "string",
                             "default": "above",
-                            "enum": ["ready", "above", "grasp", "lift", "scan"],
+                            "enum": list(skills.POSE_CHOICES),
                         },
                     }
                 ),
@@ -346,6 +385,16 @@ class RobotMcpServer:
                 "description": "Run D435i RGB-D capture, VL localization, depth back-projection, target_3d grasp-pose generation, RRT-Connect planning, simulation, and optional GIF rendering.",
                 "inputSchema": _vl_pick_schema(),
             },
+            {
+                "name": "multi_view_vl_locate_object_3d",
+                "description": "Capture multiple D435i views, run VL calls in parallel, lift each bbox to 3D, reject inconsistent candidates, and return a fused target_3d.",
+                "inputSchema": _multi_view_vl_schema(include_render=False),
+            },
+            {
+                "name": "multi_view_vl_pick_cube",
+                "description": "Run multi-view VL/depth fusion, convert the fused target_3d into grasp poses, plan with RRT-Connect, simulate pick, and optionally render a GIF.",
+                "inputSchema": _multi_view_vl_schema(include_render=True),
+            },
         ]
 
     def _ok(self, request_id: Any, result: dict[str, Any]) -> dict[str, Any]:
@@ -387,7 +436,7 @@ def _vl_observation_schema() -> dict[str, Any]:
             "pose": {
                 "type": "string",
                 "default": "scan",
-                "enum": ["ready", "above", "grasp", "lift", "scan"],
+                "enum": list(skills.POSE_CHOICES),
             },
         }
     )
@@ -425,12 +474,46 @@ def _vl_pick_schema() -> dict[str, Any]:
             "pose": {
                 "type": "string",
                 "default": "scan",
-                "enum": ["ready", "above", "grasp", "lift", "scan"],
+                "enum": list(skills.POSE_CHOICES),
             },
             **_render_schema(default_frames=0, minimum_frames=0)["properties"],
             "render_gif": {"type": "boolean", "default": True},
         }
     )
+
+
+def _multi_view_vl_schema(*, include_render: bool) -> dict[str, Any]:
+    properties = {
+        "prompt": {"type": "string", "default": "pick the red block"},
+        "provider": {
+            "type": "string",
+            "default": "color_fixture",
+            "enum": ["color_fixture", "manual_region", "openai_vision", "ark_coding_vision"],
+        },
+        "manual_regions": {
+            "type": "object",
+            "description": "Optional map from pose name to manual bbox/point region.",
+        },
+        "model": {"type": "string"},
+        "config_path": {"type": "string"},
+        "output_dir": {"type": "string"},
+        "camera_width": {"type": "integer", "default": 424, "minimum": 1},
+        "camera_height": {"type": "integer", "default": 240, "minimum": 1},
+        "seed": {"type": "integer", "default": 7},
+        "poses": {
+            "type": "array",
+            "items": {"type": "string", "enum": list(skills.POSE_CHOICES)},
+            "default": list(skills.MULTI_VIEW_DEFAULT_POSES),
+        },
+        "max_parallel_vl": {"type": "integer", "default": 4, "minimum": 1},
+    }
+    if include_render:
+        properties = {
+            **properties,
+            **_render_schema(default_frames=0, minimum_frames=0)["properties"],
+            "render_gif": {"type": "boolean", "default": True},
+        }
+    return _object_schema(properties)
 
 
 if __name__ == "__main__":

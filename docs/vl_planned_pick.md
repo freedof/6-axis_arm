@@ -87,6 +87,8 @@ assets/dobot_cr5/mjcf/cr5_planning.xml
 ```text
 plan_pick_from_target_3d
 vl_pick_cube
+multi_view_vl_locate_object_3d
+multi_view_vl_pick_cube
 ```
 
 `plan_pick_from_target_3d` 用于已经拿到 `target_3d` 的情况：
@@ -111,6 +113,38 @@ vl_pick_cube
 }
 ```
 
+`multi_view_vl_pick_cube` 用于更稳的多视角闭环：
+
+```json
+{
+  "prompt": "pick the red block",
+  "provider": "ark_coding_vision",
+  "model": "doubao-seed-2.0-pro",
+  "poses": ["scan", "scan_left", "scan_right", "scan_high"],
+  "max_parallel_vl": 4,
+  "render_gif": true
+}
+```
+
+多视角流程会先顺序生成多个 D435i 视角，再并行调用 VL provider。这样远端
+VL 调用不会简单变成 4 倍等待时间。
+
+每个视角都会输出：
+
+```text
+RGB 图
+VL overlay
+bbox
+target_3d
+accepted / rejected
+reject_reason
+```
+
+融合时会先拒绝桌面高度附近的候选，再做 3D 空间聚类，只融合属于同一目标簇
+的候选。这个设计是为了支持后续多个同形状方块：VL 需要根据用户指令中的颜色、
+位置或任务语义选择目标；如果不同视角选到了不同方块，3D 聚类会暴露不一致，
+而不是把不同方块的位置平均掉。
+
 真实 VL provider 可改为：
 
 ```json
@@ -129,6 +163,7 @@ vl_pick_cube
 
 ```powershell
 .venv\Scripts\python src\sim\verify_vl_planned_pick.py --provider color_fixture
+.venv\Scripts\python src\sim\verify_multi_view_vl_pick.py --provider color_fixture
 ```
 
 使用本地配置的 Ark coding plan 验证：

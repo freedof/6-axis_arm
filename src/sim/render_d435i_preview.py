@@ -22,6 +22,15 @@ from src.sim.gripper_pick_scene import CUBE_CENTER
 
 
 DEFAULT_OUTPUT_DIR = ROOT / "outputs" / "d435i_preview"
+SCAN_POSE_OFFSETS: dict[str, np.ndarray] = {
+    "scan": np.array([0.0, 0.0, 0.240], dtype=float),
+    "scan_front": np.array([0.0, 0.075, 0.235], dtype=float),
+    "scan_back": np.array([0.0, -0.075, 0.235], dtype=float),
+    "scan_left": np.array([-0.075, 0.0, 0.235], dtype=float),
+    "scan_right": np.array([0.075, 0.0, 0.235], dtype=float),
+    "scan_high": np.array([0.0, 0.0, 0.300], dtype=float),
+}
+POSE_CHOICES = ("ready", "above", "grasp", "lift", *SCAN_POSE_OFFSETS.keys())
 
 
 def render_preview(
@@ -108,9 +117,9 @@ def _render_context_rgb(model: mujoco.MjModel, data: mujoco.MjData, *, width: in
 
 
 def _trajectory_pose(trajectory, pose: str) -> np.ndarray:
-    if pose == "scan":
+    if pose in SCAN_POSE_OFFSETS:
         robot = dobot_cr5_simplified()
-        scan_center = np.array(CUBE_CENTER, dtype=float) + np.array([0.0, 0.0, 0.240], dtype=float)
+        scan_center = np.array(CUBE_CENTER, dtype=float) + SCAN_POSE_OFFSETS[pose]
         return _solve_gripper_center_pose(robot, scan_center, [trajectory.q_lift, trajectory.q_above, trajectory.q_ready])
     poses = {
         "ready": trajectory.q_ready,
@@ -119,7 +128,7 @@ def _trajectory_pose(trajectory, pose: str) -> np.ndarray:
         "lift": trajectory.q_lift,
     }
     if pose not in poses:
-        raise ValueError(f"Unknown D435i preview pose '{pose}'. Expected one of: {', '.join(poses)}")
+        raise ValueError(f"Unknown D435i preview pose '{pose}'. Expected one of: {', '.join(POSE_CHOICES)}")
     return poses[pose]
 
 
@@ -140,7 +149,7 @@ def main() -> None:
     parser.add_argument("--width", type=int, default=424)
     parser.add_argument("--height", type=int, default=240)
     parser.add_argument("--seed", type=int, default=7)
-    parser.add_argument("--pose", choices=("ready", "above", "grasp", "lift", "scan"), default="above")
+    parser.add_argument("--pose", choices=POSE_CHOICES, default="above")
     args = parser.parse_args()
 
     model_path = write_d435i_pick_scene_model(args.model_output)

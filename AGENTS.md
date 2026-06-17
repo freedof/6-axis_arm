@@ -142,6 +142,7 @@ Verify target_3d grasp-pose generation and RRT-Connect planned picking:
 
 ```powershell
 .venv\Scripts\python src\sim\verify_vl_planned_pick.py --provider color_fixture
+.venv\Scripts\python src\sim\verify_multi_view_vl_pick.py --provider color_fixture
 ```
 
 Optional real-provider validation, only when the selected model supports image
@@ -395,7 +396,8 @@ small numerical contact tolerance for the intended endpoint contact.
   `pick_cube`; it also exposes D435i/VL tools such as
   `render_d435i_preview`, `vl_locate_object_region`, `estimate_region_3d`, and
   `vl_locate_object_3d`; it also exposes planned picking tools such as
-  `plan_pick_from_target_3d` and `vl_pick_cube`. Keep low-level robot logic in `src/robot`,
+  `plan_pick_from_target_3d`, `vl_pick_cube`, `multi_view_vl_locate_object_3d`,
+  and `multi_view_vl_pick_cube`. Keep low-level robot logic in `src/robot`,
   `src/planning`, `src/perception`, and `src/sim`.
 - Keep planning validation aware of Jacobian singularity margins. Current
   thresholds live in `src/planning/singularity.py`.
@@ -444,6 +446,7 @@ Before reporting demo/rendering changes as complete, also run:
 .venv\Scripts\python src\sim\verify_ark_coding_vl_provider.py
 .venv\Scripts\python src\sim\verify_scene_separation.py
 .venv\Scripts\python src\sim\verify_vl_planned_pick.py --provider color_fixture
+.venv\Scripts\python src\sim\verify_multi_view_vl_pick.py --provider color_fixture
 ```
 
 Before asking for user acceptance, generate or refresh GIFs for every validation

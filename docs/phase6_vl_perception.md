@@ -282,12 +282,14 @@ status: OK
 
 ## MCP 工具
 
-MCP server 当前新增了三个 VL/深度相关工具：
+MCP server 当前新增了这些 VL/深度相关工具：
 
 ```text
 vl_locate_object_region
 estimate_region_3d
 vl_locate_object_3d
+multi_view_vl_locate_object_3d
+multi_view_vl_pick_cube
 ```
 
 典型调用意图：
@@ -312,6 +314,24 @@ overlay 图
 有效深度像素数
 ```
 
+多视角调用示例：
+
+```json
+{
+  "prompt": "pick the red block",
+  "provider": "ark_coding_vision",
+  "model": "doubao-seed-2.0-pro",
+  "poses": ["scan", "scan_left", "scan_right", "scan_high"],
+  "max_parallel_vl": 4
+}
+```
+
+多视角工具会先生成多个 D435i 视角，再并行调用 VL provider。每个视角都会
+得到 bbox 和 target_3d，随后做几何筛选和 3D 空间聚类，只融合落在同一目标簇
+的候选。后续多方块场景中，若多个方块形状相同，应通过颜色、位置或任务语义
+在 prompt 中指明目标；如果不同视角选到了不同方块，多视角聚类应暴露不一致，
+而不是把不同目标平均掉。
+
 ## 与真实 VL 模型的衔接方式
 
 真实 VL provider 应该做的事情很简单：
@@ -329,7 +349,7 @@ overlay 图
 
 ```text
 1. 增加 mask region 支持，减少 bbox 混入背景深度。
-2. 为 OpenAI VL 结果增加多次采样/一致性检查。
+2. 为真实 VL 结果增加多视角/多次采样一致性检查。
 3. 将 target_3d 转换成候选抓取姿态。
 4. 调用现有 IK、碰撞检测和 RRT-Connect 生成抓取路径。
 5. 通过 MCP 编排“看图定位 -> 规划 -> 抓取 -> GIF 验收”闭环。

@@ -97,6 +97,18 @@ Use this skill for the `F:\6-axis arm` project when the user asks Codex to find 
        "render_gif": true
      }
      ```
+   - For a more robust closed loop, especially when one view may include table
+     pixels or when multiple similar cubes are present, use
+     `multi_view_vl_pick_cube`:
+     ```json
+     {
+       "prompt": "pick the red block",
+       "provider": "color_fixture",
+       "poses": ["scan", "scan_left", "scan_right", "scan_high"],
+       "max_parallel_vl": 4,
+       "render_gif": true
+     }
+     ```
    - For the user's Ark coding plan:
      ```json
      {
@@ -153,4 +165,10 @@ reason: config/vl_providers.local.json is missing or ark_coding_vision.api_key i
 - Convert the 3D target into a grasp pose before planning.
 - For the current cube scene, convert the visible top-surface target into a cube-center estimate before top grasping.
 - Prefer `vl_pick_cube` when the user wants the full instruction -> D435i -> VL -> depth -> RRT-Connect -> pick flow.
+- Prefer `multi_view_vl_pick_cube` when robustness matters. It renders multiple
+  views first, calls the VL provider in parallel, rejects table-height or
+  inconsistent 3D candidates, and fuses only candidates in the same 3D cluster.
+- In multi-object scenes with same-shaped cubes, make the prompt identify the
+  intended object by color, spatial relation, or task role. Do not average
+  candidates from different 3D clusters; report ambiguity instead.
 - For generated visual evidence, show the overlay image in the final response when possible.
