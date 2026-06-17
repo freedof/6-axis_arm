@@ -118,14 +118,18 @@ Use this skill for the `F:\6-axis arm` project when the user asks Codex to find 
    - For the user's Ark coding plan:
      ```json
      {
-       "prompt": "pick the red block",
+       "prompt": "Pick the small red cube block on the tabletop.",
        "provider": "ark_coding_vision",
-       "model": "glm-5.2",
+       "model": "doubao-seed-2.0-pro",
        "pose": "scan",
        "width": 424,
        "height": 240
      }
      ```
+     The provider adds a fixed robot-vision localization protocol around this
+     short target request: wrist-mounted D435i view, tabletop scene, small
+     target allowed, tight bbox only, exclude gripper/table/shadows/background,
+     and avoid image-edge corner boxes.
 
 5. Always report the result as an automatic pre-check, not final grasp acceptance.
    - Include the overlay path.

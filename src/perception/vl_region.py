@@ -145,13 +145,7 @@ def locate_openai_vision_region(
     image = Image.open(rgb_path).convert("RGB")
     width, height = image.size
     image_url = _image_data_url(rgb_path)
-    instructions = (
-        "You are locating a manipulation target in a robot gripper camera image. "
-        "Return one tight bounding box around the single object that best matches the user's request. "
-        "Use pixel coordinates in the original image with bbox_xyxy = [x1, y1, x2, y2]. "
-        "If the object is partially occluded, bound the visible target surface. "
-        "Do not include robot fingers, table, shadows, or debug overlays unless the user explicitly asks for them."
-    )
+    instructions = _robot_vl_localization_instructions()
     user_text = (
         f"Image size: width={width}, height={height}. "
         f"Target request: {prompt}. "
@@ -213,13 +207,7 @@ def locate_ark_coding_vision_region(
     image = Image.open(rgb_path).convert("RGB")
     width, height = image.size
     image_url = _image_data_url(rgb_path)
-    instructions = (
-        "You are locating a manipulation target in a robot gripper camera image. "
-        "Return only a JSON object with keys: type, label, bbox_xyxy, confidence, reasoning. "
-        "Use type='bbox'. Use pixel coordinates in the original image with bbox_xyxy=[x1,y1,x2,y2]. "
-        "Return one tight bounding box around the single object that best matches the user's request. "
-        "Do not include robot fingers, table, shadows, or debug overlays unless the user explicitly asks for them."
-    )
+    instructions = _robot_vl_localization_instructions(json_only=True)
     user_text = (
         f"Image size: width={width}, height={height}. "
         f"Target request: {prompt}. "
@@ -438,6 +426,29 @@ def _provider_config(provider: str, config_path: str | Path | None) -> tuple[dic
     if not isinstance(config, dict):
         raise RuntimeError(f"VL provider '{provider}' is not configured in {path}")
     return config, path
+
+
+def _robot_vl_localization_instructions(*, json_only: bool = False) -> str:
+    output_rule = (
+        "Return only a JSON object with keys: type, label, bbox_xyxy, confidence, reasoning. "
+        if json_only
+        else "Return one structured region object. "
+    )
+    return (
+        "You are a visual grounding model for a robot manipulation system. "
+        "The image is captured by a wrist-mounted Intel RealSense D435i-style RGB-D camera on a robot gripper. "
+        "The camera is looking from above or obliquely from above at a tabletop scene. "
+        "Your job is to locate the single physical tabletop object that best matches the user's target request. "
+        f"{output_rule}"
+        "Use type='bbox'. Use pixel coordinates in the original image with bbox_xyxy=[x1,y1,x2,y2]. "
+        "The target may be small, often only a few tens of pixels wide. "
+        "Return a tight box around only the visible body of the target object. "
+        "If the object is partially occluded, box only the visible target surface. "
+        "Do not include the robot gripper, gray fingers, camera mount, table, floor, background, shadows, highlights, or empty image borders. "
+        "Do not return a 1-pixel corner or image-edge box unless the requested object itself visibly touches that edge. "
+        "Prefer a smaller precise bbox over a large bbox that includes table/background. "
+        "If multiple similar objects are visible, choose the one matching the user's color, spatial relation, or task wording, and explain that choice in reasoning."
+    )
 
 
 def _post_openai_response(payload: dict[str, Any], *, api_key: str, timeout_s: float) -> dict[str, Any]:

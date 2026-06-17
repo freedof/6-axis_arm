@@ -242,6 +242,19 @@ VL 识别需要相机看到足够完整的目标。原来的 `grasp` 姿态太�
 .venv\Scripts\python src\sim\verify_ark_coding_vl_provider.py
 ```
 
+`ark_coding_vision` 的 prompt 采用两层结构：
+
+```text
+固定机器人视觉定位协议:
+  腕部 D435i 相机、上方/斜上方桌面视角、小目标允许、bbox 必须紧贴目标主体、
+  排除夹爪/桌面/阴影/背景/图像边缘错误框。
+
+用户目标请求:
+  Pick the small red cube block on the tabletop.
+```
+
+这样 Doubao VL 不再只收到一句“找红色方块”，而是会带着机械臂场景和 bbox 输出约束进行 grounding。
+
 验证内容：
 
 ```text

@@ -23,12 +23,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--prompt",
-        default=(
-            "The image is captured by a robot wrist RGB-D camera looking from above or obliquely "
-            "from above at a tabletop scene. Find the small red cube. Return one tight bounding "
-            "box around only the visible red cube body. Exclude the table, robot gripper, shadows, "
-            "floor, background, gray gripper parts, and any non-red objects."
-        ),
+        default="Pick the small red cube block on the tabletop.",
     )
     parser.add_argument(
         "--provider",

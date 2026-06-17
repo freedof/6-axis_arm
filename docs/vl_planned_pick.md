@@ -220,7 +220,9 @@ reject_reason
 .venv\Scripts\python src\sim\verify_vl_planned_pick.py --provider ark_coding_vision --model doubao-seed-2.0-pro
 ```
 
-这一步是可选真实 provider 验证。当前已验证 `doubao-seed-2.0-pro` 可以接收
+这一步是可选真实 provider 验证。`ark_coding_vision` 会在用户目标请求外层追加固定机器人视觉定位协议：
+腕部 D435i、桌面视角、小目标允许、紧 bbox、排除夹爪/桌面/阴影/背景，并避免错误的图像边缘框。
+当前已验证 `doubao-seed-2.0-pro` 可以接收
 图片并完成闭环。如果服务返回 `Model only support text input`，说明当前选择的
 coding 模型不能接收图片，不能作为本项目的 VL provider；此时需要换成支持图像
 输入的模型或 endpoint。
