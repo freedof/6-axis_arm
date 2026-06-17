@@ -215,7 +215,6 @@ def locate_ark_coding_vision_region(
             }
         ],
         "temperature": 0,
-        "response_format": {"type": "json_object"},
     }
     response = _post_json(endpoint, payload, api_key=key, timeout_s=timeout_s, provider_name="Ark coding vision")
     raw_region = json.loads(_extract_chat_completion_text(response))
