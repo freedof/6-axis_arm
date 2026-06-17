@@ -11,6 +11,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from src.perception.vl_region import estimate_region_3d as estimate_vl_region_3d
+from src.perception.vl_region import locate_ark_coding_vision_region
 from src.perception.vl_region import locate_manual_region, locate_openai_vision_region, locate_red_region_fixture
 from src.perception.vl_region import region3d_to_dict
 from src.sim.gripper_model import DEFAULT_GRIPPER_MODEL, write_gripper_model
@@ -231,7 +232,7 @@ def vl_locate_object_region(
     seed: int = 7,
     pose: str = "scan",
 ) -> dict[str, Any]:
-    if provider not in ("color_fixture", "manual_region", "openai_vision"):
+    if provider not in ("color_fixture", "manual_region", "openai_vision", "ark_coding_vision"):
         raise ValueError(f"Unknown VL provider: {provider}")
     output = _resolve_output_dir(output_dir, "vl_region")
     observation = render_d435i_preview(output, width=width, height=height, seed=seed, pose=pose)
@@ -245,9 +246,15 @@ def vl_locate_object_region(
             raise ValueError("manual_region is required when provider='manual_region'.")
         region = locate_manual_region(manual_region, prompt=prompt, rgb_path=rgb_path, output_path=overlay_path)
         provider_note = "manual_region uses caller-provided coordinates for debugging and repeatable acceptance checks."
-    else:
+    elif provider == "openai_vision":
         region = locate_openai_vision_region(rgb_path, prompt=prompt, output_path=overlay_path, model=model)
         provider_note = "openai_vision calls the OpenAI Responses API; it requires OPENAI_API_KEY."
+    else:
+        region = locate_ark_coding_vision_region(rgb_path, prompt=prompt, output_path=overlay_path, model=model)
+        provider_note = (
+            "ark_coding_vision calls the Ark coding OpenAI-compatible chat-completions endpoint; "
+            "it requires ARK_CODING_API_KEY or ARK_API_KEY."
+        )
     region["overlay_path"] = _relative(Path(region["overlay_path"])) if region.get("overlay_path") else None
     return {
         "status": "ok",

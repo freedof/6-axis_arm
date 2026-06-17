@@ -318,7 +318,7 @@ def _vl_observation_schema() -> dict[str, Any]:
             "provider": {
                 "type": "string",
                 "default": "color_fixture",
-                "enum": ["color_fixture", "manual_region", "openai_vision"],
+                "enum": ["color_fixture", "manual_region", "openai_vision", "ark_coding_vision"],
             },
             "manual_region": {"type": "object"},
             "model": {"type": "string"},

@@ -22,6 +22,7 @@ D435i RGB 图像
 color_fixture   本地颜色规则，用于可重复自动测试
 manual_region   调用方手动传 bbox/point，用于调试和验收复现
 openai_vision   调用 OpenAI Responses API 的真实视觉语言模型
+ark_coding_vision  调用火山方舟 coding plan 的 OpenAI-compatible 接口
 ```
 
 代码入口：
@@ -40,7 +41,7 @@ src/perception/vl_region.py
 5. MCP 工具返回结构。
 ```
 
-`openai_vision` 是真实 VL provider。它只负责在图上输出目标区域，不直接输出关节角或 3D 坐标。
+`openai_vision` 和 `ark_coding_vision` 是真实 VL provider。它们只负责在图上输出目标区域，不直接输出关节角或 3D 坐标。
 
 ## VL 输出格式
 
@@ -123,6 +124,45 @@ MCP 调用示例：
 
 注意：真实 VL 模型可能框偏、框大、或选错目标。因此每次真实 VL 验证都应该查看 `overlay_path`，最终是否可用于抓取仍需要人工确认或增加更严格的自动检查。
 
+## Ark Coding Vision provider
+
+如果希望使用火山方舟 coding plan，可以使用 `ark_coding_vision` provider。
+
+默认配置来自当前 coding plan 页面：
+
+```powershell
+$env:ARK_CODING_API_KEY="你的 API Key"
+$env:ARK_CODING_BASE_URL="https://ark.cn-beijing.volces.com/api/coding/v3"
+$env:ARK_CODING_VL_MODEL="glm-5.2"
+```
+
+也可以使用兼容变量名：
+
+```powershell
+$env:ARK_API_KEY="你的 API Key"
+```
+
+MCP 调用示例：
+
+```json
+{
+  "prompt": "pick the red block",
+  "provider": "ark_coding_vision",
+  "model": "glm-5.2",
+  "pose": "scan",
+  "width": 424,
+  "height": 240
+}
+```
+
+该 provider 会向下面的 chat-completions endpoint 发送图像：
+
+```text
+https://ark.cn-beijing.volces.com/api/coding/v3/chat/completions
+```
+
+注意：如果当前 coding plan 下的 `glm-5.2` 不支持图像输入，验证脚本会返回接口错误。此时说明它可以用于编程模型，但不能直接作为本项目的 VL 视觉识别模型，需要换成支持视觉输入的模型或 endpoint。
+
 ## 深度反投影逻辑
 
 代码入口：
@@ -159,6 +199,7 @@ VL 识别需要相机看到足够完整的目标。原来的 `grasp` 姿态太�
 ```powershell
 .venv\Scripts\python src\sim\verify_vl_region.py
 .venv\Scripts\python src\sim\verify_openai_vl_provider.py
+.venv\Scripts\python src\sim\verify_ark_coding_vl_provider.py
 ```
 
 验证内容：
@@ -197,6 +238,13 @@ status: OK
 ```text
 未设置 OPENAI_API_KEY: status SKIPPED
 已设置 OPENAI_API_KEY: 调用 openai_vision，生成 OpenAI VL overlay，并检查 depth 反投影
+```
+
+`verify_ark_coding_vl_provider.py` 是可选 coding plan 验证：
+
+```text
+未设置 ARK_CODING_API_KEY/ARK_API_KEY: status SKIPPED
+已设置 API key: 调用 ark_coding_vision，生成 Ark VL overlay，并检查 depth 反投影
 ```
 
 ## MCP 工具

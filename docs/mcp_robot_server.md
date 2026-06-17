@@ -262,9 +262,10 @@ vl_locate_object_3d
 color_fixture
 manual_region
 openai_vision
+ark_coding_vision
 ```
 
-`color_fixture` 用于本地可重复测试；`manual_region` 用于调用方手动传入 bbox/point；`openai_vision` 会调用 OpenAI Responses API，需要设置 `OPENAI_API_KEY`。
+`color_fixture` 用于本地可重复测试；`manual_region` 用于调用方手动传入 bbox/point；`openai_vision` 会调用 OpenAI Responses API，需要设置 `OPENAI_API_KEY`；`ark_coding_vision` 会调用火山方舟 coding plan 的 OpenAI-compatible chat-completions endpoint，需要设置 `ARK_CODING_API_KEY` 或 `ARK_API_KEY`。
 
 典型调用：
 
@@ -289,6 +290,27 @@ openai_vision
   "width": 424,
   "height": 240
 }
+```
+
+火山方舟 coding plan 调用示例：
+
+```json
+{
+  "prompt": "pick the red block",
+  "provider": "ark_coding_vision",
+  "model": "glm-5.2",
+  "pose": "scan",
+  "width": 424,
+  "height": 240
+}
+```
+
+对应环境变量：
+
+```powershell
+$env:ARK_CODING_API_KEY="你的 API Key"
+$env:ARK_CODING_BASE_URL="https://ark.cn-beijing.volces.com/api/coding/v3"
+$env:ARK_CODING_VL_MODEL="glm-5.2"
 ```
 
 手动区域调试示例：

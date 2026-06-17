@@ -160,6 +160,66 @@ def locate_openai_vision_region(
     return normalized
 
 
+def locate_ark_coding_vision_region(
+    rgb_path: str | Path,
+    *,
+    prompt: str,
+    output_path: str | Path | None = None,
+    model: str | None = None,
+    api_key: str | None = None,
+    base_url: str | None = None,
+    timeout_s: float = 60.0,
+) -> dict[str, Any]:
+    """Call an OpenAI-compatible Ark coding endpoint and return a bbox region."""
+    rgb_path = Path(rgb_path)
+    key = api_key or os.environ.get("ARK_CODING_API_KEY") or os.environ.get("ARK_API_KEY")
+    if not key:
+        raise RuntimeError("ARK_CODING_API_KEY or ARK_API_KEY is required for provider='ark_coding_vision'.")
+
+    selected_model = model or os.environ.get("ARK_CODING_VL_MODEL", "glm-5.2")
+    endpoint = _chat_completions_endpoint(
+        base_url or os.environ.get("ARK_CODING_BASE_URL", "https://ark.cn-beijing.volces.com/api/coding/v3")
+    )
+    image = Image.open(rgb_path).convert("RGB")
+    width, height = image.size
+    image_url = _image_data_url(rgb_path)
+    instructions = (
+        "You are locating a manipulation target in a robot gripper camera image. "
+        "Return only a JSON object with keys: type, label, bbox_xyxy, confidence, reasoning. "
+        "Use type='bbox'. Use pixel coordinates in the original image with bbox_xyxy=[x1,y1,x2,y2]. "
+        "Return one tight bounding box around the single object that best matches the user's request. "
+        "Do not include robot fingers, table, shadows, or debug overlays unless the user explicitly asks for them."
+    )
+    user_text = (
+        f"Image size: width={width}, height={height}. "
+        f"Target request: {prompt}. "
+        "Return strict JSON only."
+    )
+    payload = {
+        "model": selected_model,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": instructions + "\n" + user_text},
+                    {"type": "image_url", "image_url": {"url": image_url}},
+                ],
+            }
+        ],
+        "temperature": 0,
+        "response_format": {"type": "json_object"},
+    }
+    response = _post_json(endpoint, payload, api_key=key, timeout_s=timeout_s, provider_name="Ark coding vision")
+    raw_region = json.loads(_extract_chat_completion_text(response))
+    normalized = _normalize_region(raw_region, prompt=prompt, provider="ark_coding_vision", image_size=(width, height))
+    normalized["model"] = selected_model
+    normalized["base_url"] = endpoint.rsplit("/chat/completions", 1)[0]
+    if output_path is not None:
+        overlay_path = _draw_region_overlay(rgb_path, normalized, output_path, label="Ark VL")
+        normalized["overlay_path"] = str(overlay_path)
+    return normalized
+
+
 def estimate_region_3d(
     *,
     depth_path: str | Path,
@@ -330,9 +390,26 @@ def _image_data_url(path: Path) -> str:
 
 
 def _post_openai_response(payload: dict[str, Any], *, api_key: str, timeout_s: float) -> dict[str, Any]:
+    return _post_json(
+        "https://api.openai.com/v1/responses",
+        payload,
+        api_key=api_key,
+        timeout_s=timeout_s,
+        provider_name="OpenAI vision",
+    )
+
+
+def _post_json(
+    url: str,
+    payload: dict[str, Any],
+    *,
+    api_key: str,
+    timeout_s: float,
+    provider_name: str,
+) -> dict[str, Any]:
     data = json.dumps(payload).encode("utf-8")
     request = urllib.request.Request(
-        "https://api.openai.com/v1/responses",
+        url,
         data=data,
         headers={
             "Authorization": f"Bearer {api_key}",
@@ -345,9 +422,9 @@ def _post_openai_response(payload: dict[str, Any], *, api_key: str, timeout_s: f
             return json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         body = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"OpenAI vision request failed: HTTP {exc.code}: {body}") from exc
+        raise RuntimeError(f"{provider_name} request failed: HTTP {exc.code}: {body}") from exc
     except urllib.error.URLError as exc:
-        raise RuntimeError(f"OpenAI vision request failed: {exc}") from exc
+        raise RuntimeError(f"{provider_name} request failed: {exc}") from exc
 
 
 def _extract_response_text(response: dict[str, Any]) -> str:
@@ -360,6 +437,47 @@ def _extract_response_text(response: dict[str, Any]) -> str:
             if content.get("type") == "output_text" and isinstance(content.get("text"), str):
                 return content["text"]
     raise RuntimeError(f"Could not extract text output from OpenAI response: {response}")
+
+
+def _extract_chat_completion_text(response: dict[str, Any]) -> str:
+    choices = response.get("choices")
+    if not isinstance(choices, list) or not choices:
+        raise RuntimeError(f"Could not extract choices from chat completion response: {response}")
+    message = choices[0].get("message", {})
+    content = message.get("content")
+    if isinstance(content, str):
+        return _extract_json_object_text(content)
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, dict) and isinstance(item.get("text"), str):
+                parts.append(item["text"])
+        if parts:
+            return _extract_json_object_text("\n".join(parts))
+    raise RuntimeError(f"Could not extract message content from chat completion response: {response}")
+
+
+def _extract_json_object_text(text: str) -> str:
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        lines = stripped.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].startswith("```"):
+            lines = lines[:-1]
+        stripped = "\n".join(lines).strip()
+    start = stripped.find("{")
+    end = stripped.rfind("}")
+    if start < 0 or end < start:
+        raise RuntimeError(f"Expected a JSON object in model output, got: {text}")
+    return stripped[start : end + 1]
+
+
+def _chat_completions_endpoint(base_url: str) -> str:
+    normalized = base_url.rstrip("/")
+    if normalized.endswith("/chat/completions"):
+        return normalized
+    return normalized + "/chat/completions"
 
 
 def _round_vector(values: np.ndarray) -> list[float]:
