@@ -83,12 +83,12 @@
     </body>
   <geom name="floor_collision" type="plane" pos="0 0 0" size="1.8 1.8 0.02" rgba="0.2 0.7 0.2 0.20" contype="1" conaffinity="1" group="2" /></worldbody>
   <actuator>
-    <position name="joint1_position" joint="joint1" ctrlrange="-3.14 3.14" kp="700" kv="45" forcerange="-450 450" />
-    <position name="joint2_position" joint="joint2" ctrlrange="-3.14 3.14" kp="700" kv="45" forcerange="-450 450" />
-    <position name="joint3_position" joint="joint3" ctrlrange="-2.86 2.86" kp="700" kv="45" forcerange="-450 450" />
-    <position name="joint4_position" joint="joint4" ctrlrange="-3.14 3.14" kp="700" kv="45" forcerange="-450 450" />
-    <position name="joint5_position" joint="joint5" ctrlrange="-3.14 3.14" kp="700" kv="45" forcerange="-450 450" />
-    <position name="joint6_position" joint="joint6" ctrlrange="-6.28 6.28" kp="700" kv="45" forcerange="-450 450" />
+    <position name="joint1_position" joint="joint1" ctrlrange="-3.14 3.14" kp="420" kv="60" forcerange="-320 320" />
+    <position name="joint2_position" joint="joint2" ctrlrange="-3.14 3.14" kp="420" kv="60" forcerange="-320 320" />
+    <position name="joint3_position" joint="joint3" ctrlrange="-2.86 2.86" kp="420" kv="60" forcerange="-320 320" />
+    <position name="joint4_position" joint="joint4" ctrlrange="-3.14 3.14" kp="420" kv="60" forcerange="-320 320" />
+    <position name="joint5_position" joint="joint5" ctrlrange="-3.14 3.14" kp="420" kv="60" forcerange="-320 320" />
+    <position name="joint6_position" joint="joint6" ctrlrange="-6.28 6.28" kp="420" kv="60" forcerange="-320 320" />
     <position name="gripper_left_position" joint="gripper_left_slide" ctrlrange="0 0.035" kp="220" kv="12" forcerange="-80 80" />
     <position name="gripper_right_position" joint="gripper_right_slide" ctrlrange="0 0.035" kp="220" kv="12" forcerange="-80 80" />
   </actuator>

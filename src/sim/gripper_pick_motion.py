@@ -30,6 +30,8 @@ GRIPPER_CLOSED_QPOS = 0.0
 PLANNED_PICK_READY_DWELL_SECONDS = 0.6
 PLANNED_PICK_CLOSE_SECONDS = 0.8
 PLANNED_PICK_FINAL_DWELL_SECONDS = 1.0
+PICK_MAX_JOINT_VELOCITY = 0.45
+PICK_MAX_JOINT_ACCELERATION = 0.80
 
 
 @dataclass(frozen=True)
@@ -116,8 +118,8 @@ def plan_pick_trajectory_from_target_3d(
     target_surface_world: np.ndarray,
     *,
     shortcut: bool = True,
-    max_joint_velocity: float = 0.8,
-    max_joint_acceleration: float = 1.6,
+    max_joint_velocity: float = PICK_MAX_JOINT_VELOCITY,
+    max_joint_acceleration: float = PICK_MAX_JOINT_ACCELERATION,
 ) -> PlannedPickTrajectory:
     target = np.asarray(target_surface_world, dtype=float)
     cube_center = cube_center_from_target_surface(target)
@@ -209,12 +211,12 @@ def simulate_pick(
 
     steps_per_frame = max(1, int(round(1.0 / (fps * model.opt.timestep))))
     for frame_index in range(frames):
-        sim_time = frame_index / fps
-        if planned_trajectory is None:
-            q_des, gripper_des = command_at_time(trajectory, sim_time)
-        else:
-            q_des, gripper_des = planned_command_at_time(planned_trajectory, sim_time)
-        for _ in range(steps_per_frame):
+        for step_index in range(steps_per_frame):
+            sim_time = (frame_index * steps_per_frame + step_index) * model.opt.timestep
+            if planned_trajectory is None:
+                q_des, gripper_des = command_at_time(trajectory, sim_time)
+            else:
+                q_des, gripper_des = planned_command_at_time(planned_trajectory, sim_time)
             data.ctrl[:ROBOT_DOF] = q_des
             data.ctrl[ROBOT_DOF : ROBOT_DOF + GRIPPER_DOF] = gripper_des
             mujoco.mj_step(model, data)

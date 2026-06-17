@@ -116,9 +116,9 @@ def _tune_pick_actuators(root: ET.Element) -> None:
     for position in actuator.findall("position"):
         name = position.attrib.get("name", "")
         if name.startswith("joint"):
-            position.set("kp", "700")
-            position.set("kv", "45")
-            position.set("forcerange", "-450 450")
+            position.set("kp", "420")
+            position.set("kv", "60")
+            position.set("forcerange", "-320 320")
         elif name.startswith("gripper"):
             position.set("kp", "220")
             position.set("kv", "12")

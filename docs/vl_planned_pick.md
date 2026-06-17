@@ -84,6 +84,29 @@ assets/dobot_cr5/mjcf/cr5_planning.xml
 
 新增两个 MCP 工具：
 
+## 执行速度和超调控制
+
+抓取执行默认使用保守速度：
+
+```text
+max_joint_velocity     = 0.45 rad/s
+max_joint_acceleration = 0.80 rad/s^2
+```
+
+MuJoCo 仿真和 GIF 渲染时，关节目标会在每个 physics step 按连续时间重新采样，
+而不是只按 GIF 帧率更新。这样可以避免 20Hz 帧率目标造成阶跃追踪，减少机械臂
+看起来“冲得很快”或“过头”的现象。
+
+抓取场景中的关节 position actuator 也使用较保守的伺服参数：
+
+```text
+joint kp         = 420
+joint kv         = 60
+joint forcerange = -320 320
+```
+
+这些参数优先服务于稳定、可观察的仿真抓取，而不是追求最快动作。
+
 ```text
 plan_pick_from_target_3d
 vl_pick_cube

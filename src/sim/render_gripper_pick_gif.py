@@ -77,12 +77,12 @@ def render_gif(
         scene_option.sitegroup[:] = 0
 
     for frame_index in range(frames):
-        sim_time = frame_index / fps
-        if planned_trajectory is None:
-            q_des, gripper_des = command_at_time(trajectory, sim_time)
-        else:
-            q_des, gripper_des = planned_command_at_time(planned_trajectory, sim_time)
-        for _ in range(steps_per_frame):
+        for step_index in range(steps_per_frame):
+            sim_time = (frame_index * steps_per_frame + step_index) * model.opt.timestep
+            if planned_trajectory is None:
+                q_des, gripper_des = command_at_time(trajectory, sim_time)
+            else:
+                q_des, gripper_des = planned_command_at_time(planned_trajectory, sim_time)
             data.ctrl[:ROBOT_DOF] = q_des
             data.ctrl[ROBOT_DOF : ROBOT_DOF + GRIPPER_DOF] = gripper_des
             mujoco.mj_step(model, data)
