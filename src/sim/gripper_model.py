@@ -141,8 +141,8 @@ def _finger_body(
         {
             "name": finger_geom,
             "type": "box",
-            "pos": "0 0 0.036",
-            "size": "0.007 0.012 0.046",
+            "pos": "0 0 0.035",
+            "size": "0.007 0.012 0.030",
             "material": "gripper_finger_mat",
             "contype": "1",
             "conaffinity": "1",
@@ -154,8 +154,8 @@ def _finger_body(
         {
             "name": pad_geom,
             "type": "box",
-            "pos": f"{pad_x} 0 0.020",
-            "size": "0.004 0.013 0.024",
+            "pos": f"{pad_x} 0 0.037",
+            "size": "0.004 0.013 0.038",
             "material": "gripper_pad_mat",
             "friction": "3.0 0.08 0.006",
             "condim": "4",

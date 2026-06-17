@@ -60,13 +60,13 @@
                     <site name="gripper_tcp" pos="0 0 0.110" size="0.010" rgba="0.10 0.95 0.40 1" />
                     <body name="gripper_left_finger" pos="0.023 0 0.052">
                       <joint name="gripper_left_slide" type="slide" axis="1 0 0" range="0 0.035" damping="0.6" armature="0.001" />
-                      <geom name="gripper_left_finger_geom" type="box" pos="0 0 0.036" size="0.007 0.012 0.046" material="gripper_finger_mat" contype="0" conaffinity="0" group="1" />
-                      <geom name="gripper_left_pad" type="box" pos="-0.0075 0 0.020" size="0.004 0.013 0.024" material="gripper_pad_mat" friction="3.0 0.08 0.006" condim="4" solref="0.006 1" solimp="0.95 0.99 0.002" contype="0" conaffinity="0" group="1" />
+                      <geom name="gripper_left_finger_geom" type="box" pos="0 0 0.035" size="0.007 0.012 0.030" material="gripper_finger_mat" contype="0" conaffinity="0" group="1" />
+                      <geom name="gripper_left_pad" type="box" pos="-0.0075 0 0.037" size="0.004 0.013 0.038" material="gripper_pad_mat" friction="3.0 0.08 0.006" condim="4" solref="0.006 1" solimp="0.95 0.99 0.002" contype="0" conaffinity="0" group="1" />
                     </body>
                     <body name="gripper_right_finger" pos="-0.023 0 0.052">
                       <joint name="gripper_right_slide" type="slide" axis="-1 0 0" range="0 0.035" damping="0.6" armature="0.001" />
-                      <geom name="gripper_right_finger_geom" type="box" pos="0 0 0.036" size="0.007 0.012 0.046" material="gripper_finger_mat" contype="0" conaffinity="0" group="1" />
-                      <geom name="gripper_right_pad" type="box" pos="0.0075 0 0.020" size="0.004 0.013 0.024" material="gripper_pad_mat" friction="3.0 0.08 0.006" condim="4" solref="0.006 1" solimp="0.95 0.99 0.002" contype="0" conaffinity="0" group="1" />
+                      <geom name="gripper_right_finger_geom" type="box" pos="0 0 0.035" size="0.007 0.012 0.030" material="gripper_finger_mat" contype="0" conaffinity="0" group="1" />
+                      <geom name="gripper_right_pad" type="box" pos="0.0075 0 0.037" size="0.004 0.013 0.038" material="gripper_pad_mat" friction="3.0 0.08 0.006" condim="4" solref="0.006 1" solimp="0.95 0.99 0.002" contype="0" conaffinity="0" group="1" />
                     </body>
                   </body>
                 <geom name="collision_tool" type="capsule" fromto="0 0 0 0 0 0.08" size="0.020" material="collision_mat" contype="1" conaffinity="1" group="2" /></body>
