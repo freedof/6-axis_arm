@@ -26,6 +26,7 @@ from src.sim.planning_model import DEFAULT_PICK_PLANNING_MODEL, write_planning_m
 ROBOT_DOF = 6
 GRIPPER_DOF = 2
 GRASP_CENTER_OFFSET = 0.072
+GRASP_CENTER_Z_LIFT = 0.015
 GRIPPER_CLOSED_QPOS = 0.0
 PLANNED_PICK_READY_DWELL_SECONDS = 0.6
 PLANNED_PICK_ABOVE_DWELL_SECONDS = 0.4
@@ -110,9 +111,10 @@ def cube_center_from_target_surface(
 def solve_pick_trajectory(cube_center: np.ndarray = np.array(CUBE_CENTER, dtype=float)) -> PickTrajectory:
     robot = dobot_cr5_simplified()
     seeds = [READY_Q]
-    grasp_center = np.asarray(cube_center, dtype=float)
-    above_center = grasp_center + np.array([0.0, 0.0, 0.120], dtype=float)
-    lift_center = grasp_center + np.array([0.0, 0.0, 0.150], dtype=float)
+    cube_center = np.asarray(cube_center, dtype=float)
+    grasp_center = cube_center + np.array([0.0, 0.0, GRASP_CENTER_Z_LIFT], dtype=float)
+    above_center = cube_center + np.array([0.0, 0.0, 0.120], dtype=float)
+    lift_center = cube_center + np.array([0.0, 0.0, 0.150], dtype=float)
 
     q_above = _solve_gripper_center_pose(robot, above_center, seeds)
     q_grasp = _solve_gripper_center_pose(robot, grasp_center, [q_above, READY_Q])

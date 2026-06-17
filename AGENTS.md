@@ -398,6 +398,8 @@ small numerical contact tolerance for the intended endpoint contact.
 - `target_3d` planned grasping is documented in `docs/vl_planned_pick.md`.
   The visible surface point from depth is converted to a cube-center estimate,
   then used to generate top-grasp poses and RRT-Connect planned pick segments.
+  The current gripper-center grasp pose is offset `0.015 m` above the estimated
+  cube center to avoid descending too close to the table.
 - The first local MCP server lives in `src/mcp_robot/server.py`. It exposes
   high-level tools such as `get_robot_capabilities`, `get_scene_state`, and
   `pick_cube`; it also exposes D435i/VL tools such as
