@@ -16,7 +16,7 @@ D435i RGB 图像
 
 ## 重要说明
 
-当前仓库支持四种 provider：
+当前仓库支持六种 provider：
 
 ```text
 color_fixture   本地颜色规则，用于可重复自动测试
@@ -24,6 +24,7 @@ manual_region   调用方手动传 bbox/point，用于调试和验收复现
 codex_vision    Codex 在当前对话中看图后传 bbox/point，用于交互式 VL 服务
 openai_vision   调用 OpenAI Responses API 的真实视觉语言模型
 ark_coding_vision  调用火山方舟 coding plan 的 OpenAI-compatible 接口
+openrouter_vision  调用 OpenRouter OpenAI-compatible 接口，可使用 Gemini 等视觉模型
 ```
 
 代码入口：
@@ -58,7 +59,7 @@ config/vl_providers.local.json
 
 `codex_vision` 是当前阶段优先使用的交互式 VL provider：D435i 负责拍照，Codex 在对话中查看 RGB 图并给出 bbox/point，项目代码再把该区域反投影到 3D 并接入抓取规划。它适合 Codex 操作和验证演示，但不是无人值守的外部视觉服务。
 
-`openai_vision` 和 `ark_coding_vision` 是外部真实 VL provider。它们只负责在图上输出目标区域，不直接输出关节角或 3D 坐标。
+`openai_vision`、`ark_coding_vision` 和 `openrouter_vision` 是外部真实 VL provider。它们只负责在图上输出目标区域，不直接输出关节角或 3D 坐标。
 
 ## VL 输出格式
 
@@ -199,6 +200,57 @@ https://ark.cn-beijing.volces.com/api/coding/v3/chat/completions
 
 注意：当前已验证 `doubao-seed-2.0-pro` 可以接收图片并完成 VL 闭环。如果某个 coding plan 模型返回 `Model only support text input`，说明它可以用于编程模型，但不能直接作为本项目的 VL 视觉识别模型，需要换成支持视觉输入的模型或 endpoint。
 
+## OpenRouter Vision provider
+
+如果希望通过 OpenRouter 使用 Gemini 等视觉模型，可以使用 `openrouter_vision` provider。
+
+本地配置示例：
+```json
+{
+  "providers": {
+    "openrouter_vision": {
+      "api_key": "你的 OpenRouter API Key",
+      "base_url": "https://openrouter.ai/api/v1",
+      "model": "google/gemini-3.5-flash"
+    }
+  }
+}
+```
+
+该 provider 会向下面的 OpenAI-compatible chat-completions endpoint 发送图像：
+
+```text
+https://openrouter.ai/api/v1/chat/completions
+```
+
+OpenRouter 支持把本地图片编码为 base64 data URL 后作为 `image_url` 输入；本项目的 D435i RGB 图就是按这种方式发送。`model` 可在 MCP 调用时覆盖，例如：
+
+```json
+{
+  "prompt": "Pick the small red cube block on the tabletop.",
+  "provider": "openrouter_vision",
+  "model": "google/gemini-3.5-flash",
+  "pose": "scan_high",
+  "width": 424,
+  "height": 240
+}
+```
+
+多视角抓取验证示例：
+
+```json
+{
+  "prompt": "Pick the small red cube block on the tabletop.",
+  "provider": "openrouter_vision",
+  "model": "google/gemini-3.5-flash",
+  "poses": ["scan_high", "scan_front_high", "scan_left_high", "scan_right_high"],
+  "max_parallel_vl": 4,
+  "render_gif": true
+}
+```
+
+与其他外部 VL provider 一样，`openrouter_vision` 至少需要 `2` 个视角通过几何和一致性检查，才会进入抓取规划。
+
 ## 深度反投影逻辑
 
 代码入口：
@@ -240,6 +292,7 @@ VL 识别需要相机看到足够完整的目标。原来的 `grasp` 姿态太�
 .venv\Scripts\python src\sim\verify_vl_region.py
 .venv\Scripts\python src\sim\verify_openai_vl_provider.py
 .venv\Scripts\python src\sim\verify_ark_coding_vl_provider.py
+.venv\Scripts\python src\sim\verify_openrouter_vl_provider.py
 ```
 
 `ark_coding_vision` 的 prompt 采用两层结构：
@@ -307,6 +360,13 @@ status: OK
 ```text
 未配置 config/vl_providers.local.json 或 ark_coding_vision.api_key: status SKIPPED
 已配置 ark_coding_vision.api_key: 调用 ark_coding_vision，生成 Ark VL overlay，并检查 depth 反投影
+```
+
+`verify_openrouter_vl_provider.py` 是可选 OpenRouter 验证：
+
+```text
+未配置 config/vl_providers.local.json 或 openrouter_vision.api_key: status SKIPPED
+已配置 openrouter_vision.api_key: 调用 openrouter_vision，生成 OpenRouter VL overlay，并检查 depth 反投影
 ```
 
 ## MCP 工具

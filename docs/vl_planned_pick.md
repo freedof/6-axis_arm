@@ -209,6 +209,18 @@ reject_reason
 }
 ```
 
+如果通过 OpenRouter 使用 Gemini 视觉模型，可改为：
+
+```json
+{
+  "prompt": "Pick the small red cube block on the tabletop.",
+  "provider": "openrouter_vision",
+  "model": "google/gemini-3.5-flash",
+  "pose": "scan_high",
+  "render_gif": true
+}
+```
+
 ## 自动验证
 
 离线可重复验证：
@@ -216,6 +228,7 @@ reject_reason
 ```powershell
 .venv\Scripts\python src\sim\verify_vl_planned_pick.py --provider color_fixture
 .venv\Scripts\python src\sim\verify_multi_view_vl_pick.py --provider color_fixture
+.venv\Scripts\python src\sim\verify_openrouter_vl_provider.py
 ```
 
 使用本地配置的 Ark coding plan 验证：

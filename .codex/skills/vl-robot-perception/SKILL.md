@@ -1,6 +1,6 @@
 ---
 name: vl-robot-perception
-description: Use for this Dobot CR5 MuJoCo project when Codex needs to locate a manipulation target from the gripper-mounted D435i RGB-D camera, use Codex itself as a human-in-the-loop VL judge, call a configured VL provider such as color_fixture/manual_region/codex_vision/openai_vision/ark_coding_vision, convert a 2D bbox or point into a 3D world target with depth, or report VL overlay/validation results before grasp planning.
+description: Use for this Dobot CR5 MuJoCo project when Codex needs to locate a manipulation target from the gripper-mounted D435i RGB-D camera, use Codex itself as a human-in-the-loop VL judge, call a configured VL provider such as color_fixture/manual_region/codex_vision/openai_vision/ark_coding_vision/openrouter_vision, convert a 2D bbox or point into a 3D world target with depth, or report VL overlay/validation results before grasp planning.
 ---
 
 # VL Robot Perception
@@ -26,6 +26,7 @@ Use this skill for the `F:\6-axis arm` project when the user asks Codex to find 
    - `codex_vision`: Codex inspects the image in the current session and supplies bbox/point coordinates, while the project records it as a Codex-in-the-loop VL provider.
    - `openai_vision`: calls the OpenAI Responses API using `config/vl_providers.local.json`.
    - `ark_coding_vision`: calls the Ark coding OpenAI-compatible endpoint using `config/vl_providers.local.json`.
+   - `openrouter_vision`: calls the OpenRouter OpenAI-compatible endpoint using `config/vl_providers.local.json`.
    - To configure real providers, copy `config/vl_providers.example.json` to `config/vl_providers.local.json` and fill in the API key. Do not commit the local file.
 
 3. For Codex-in-the-loop VL, inspect the RGB image and return a manual region.
@@ -132,11 +133,25 @@ Use this skill for the `F:\6-axis arm` project when the user asks Codex to find 
      and avoid image-edge corner boxes.
      Ark localization retries each view up to two times and runs an advisory VL
      self-check that may correct the bbox before depth lifting.
+   - For OpenRouter / Gemini:
+     ```json
+     {
+       "prompt": "Pick the small red cube block on the tabletop.",
+       "provider": "openrouter_vision",
+       "model": "google/gemini-3.5-flash",
+       "pose": "scan_high",
+       "width": 424,
+       "height": 240
+     }
+     ```
+     OpenRouter uses the OpenAI-compatible chat-completions endpoint. The local
+     config should set `base_url` to `https://openrouter.ai/api/v1` and store
+     the user's OpenRouter API key under `openrouter_vision.api_key`.
 
 5. Always report the result as an automatic pre-check, not final grasp acceptance.
    - Include the overlay path.
    - Include bbox/point, 3D world target, depth value, and valid depth pixel count.
-   - State whether the provider was `color_fixture`, `manual_region`, `codex_vision`, `openai_vision`, or `ark_coding_vision`.
+   - State whether the provider was `color_fixture`, `manual_region`, `codex_vision`, `openai_vision`, `ark_coding_vision`, or `openrouter_vision`.
    - If a real provider was skipped because no local config/API key exists, say so plainly.
 
 ## Validation
@@ -153,6 +168,7 @@ Optional real-provider validation:
 ```powershell
 .venv\Scripts\python src\sim\verify_openai_vl_provider.py
 .venv\Scripts\python src\sim\verify_ark_coding_vl_provider.py
+.venv\Scripts\python src\sim\verify_openrouter_vl_provider.py
 ```
 
 Expected no-config behavior:
@@ -167,6 +183,13 @@ Expected Ark no-config behavior:
 ```text
 status: SKIPPED
 reason: config/vl_providers.local.json is missing or ark_coding_vision.api_key is not set.
+```
+
+Expected OpenRouter no-config behavior:
+
+```text
+status: SKIPPED
+reason: config/vl_providers.local.json is missing or openrouter_vision.api_key is not set.
 ```
 
 ## Interpretation Rules
@@ -184,7 +207,8 @@ reason: config/vl_providers.local.json is missing or ark_coding_vision.api_key i
 - Prefer `multi_view_vl_pick_cube` when robustness matters. It renders multiple
   views first, calls the VL provider in parallel, rejects table-height or
   inconsistent 3D candidates, and fuses only candidates in the same 3D cluster.
-  External VL providers such as `openai_vision` and `ark_coding_vision` require
+  External VL providers such as `openai_vision`, `ark_coding_vision`, and
+  `openrouter_vision` require
   at least two accepted views before grasp planning; a single accepted view is
   reported as unreliable perception.
 - In multi-object scenes with same-shaped cubes, make the prompt identify the

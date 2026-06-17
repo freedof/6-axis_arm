@@ -136,6 +136,7 @@ Verify VL-style region localization and D435i depth back-projection:
 .venv\Scripts\python src\sim\verify_vl_region.py
 .venv\Scripts\python src\sim\verify_openai_vl_provider.py
 .venv\Scripts\python src\sim\verify_ark_coding_vl_provider.py
+.venv\Scripts\python src\sim\verify_openrouter_vl_provider.py
 ```
 
 Verify target_3d grasp-pose generation and RRT-Connect planned picking:
@@ -457,6 +458,7 @@ Before reporting demo/rendering changes as complete, also run:
 .venv\Scripts\python src\sim\verify_vl_region.py
 .venv\Scripts\python src\sim\verify_openai_vl_provider.py
 .venv\Scripts\python src\sim\verify_ark_coding_vl_provider.py
+.venv\Scripts\python src\sim\verify_openrouter_vl_provider.py
 .venv\Scripts\python src\sim\verify_scene_separation.py
 .venv\Scripts\python src\sim\verify_vl_planned_pick.py --provider color_fixture
 .venv\Scripts\python src\sim\verify_multi_view_vl_pick.py --provider color_fixture

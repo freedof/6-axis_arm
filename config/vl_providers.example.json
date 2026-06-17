@@ -5,6 +5,11 @@
       "base_url": "https://ark.cn-beijing.volces.com/api/coding/v3",
       "model": "doubao-seed-2.0-pro"
     },
+    "openrouter_vision": {
+      "api_key": "REPLACE_WITH_YOUR_OPENROUTER_API_KEY",
+      "base_url": "https://openrouter.ai/api/v1",
+      "model": "google/gemini-3.5-flash"
+    },
     "openai_vision": {
       "api_key": "REPLACE_WITH_YOUR_OPENAI_API_KEY",
       "model": "gpt-5.5"

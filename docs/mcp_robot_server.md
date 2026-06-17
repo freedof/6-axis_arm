@@ -256,7 +256,7 @@ vl_locate_object_3d
 
 输入 RGB 图像和文本目标意图，返回 VL 风格的 2D 区域。
 
-当前支持四种 provider：
+当前支持六种 provider：
 
 ```text
 color_fixture
@@ -264,9 +264,10 @@ manual_region
 codex_vision
 openai_vision
 ark_coding_vision
+openrouter_vision
 ```
 
-`color_fixture` 用于本地可重复测试；`manual_region` 用于调用方手动传入 bbox/point；`codex_vision` 用于由当前 Codex 会话看图后传入 bbox/point，并在结果中明确记录为 Codex-in-the-loop VL；`openai_vision` 会调用 OpenAI Responses API；`ark_coding_vision` 会调用火山方舟 coding plan 的 OpenAI-compatible chat-completions endpoint。真实 provider 的 API Key、Base URL、模型名从 `config/vl_providers.local.json` 读取。
+`color_fixture` 用于本地可重复测试；`manual_region` 用于调用方手动传入 bbox/point；`codex_vision` 用于由当前 Codex 会话看图后传入 bbox/point，并在结果中明确记录为 Codex-in-the-loop VL；`openai_vision` 会调用 OpenAI Responses API；`ark_coding_vision` 会调用火山方舟 coding plan 的 OpenAI-compatible chat-completions endpoint；`openrouter_vision` 会调用 OpenRouter 的 OpenAI-compatible chat-completions endpoint，可用于 Gemini 等视觉模型。真实 provider 的 API Key、Base URL、模型名从 `config/vl_providers.local.json` 读取。
 
 首次配置：
 
@@ -309,6 +310,18 @@ Copy-Item config\vl_providers.example.json config\vl_providers.local.json
   "provider": "ark_coding_vision",
   "model": "glm-5.2",
   "pose": "scan",
+  "width": 424,
+  "height": 240
+}
+```
+
+OpenRouter / Gemini 视觉模型调用示例：
+```json
+{
+  "prompt": "Pick the small red cube block on the tabletop.",
+  "provider": "openrouter_vision",
+  "model": "google/gemini-3.5-flash",
+  "pose": "scan_high",
   "width": 424,
   "height": 240
 }

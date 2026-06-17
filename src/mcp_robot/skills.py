@@ -14,7 +14,7 @@ if str(ROOT) not in sys.path:
 from src.perception.vl_region import estimate_region_3d as estimate_vl_region_3d
 from src.perception.vl_region import locate_ark_coding_vision_region
 from src.perception.vl_region import locate_codex_vision_region
-from src.perception.vl_region import locate_manual_region, locate_openai_vision_region, locate_red_region_fixture
+from src.perception.vl_region import locate_manual_region, locate_openai_vision_region, locate_openrouter_vision_region, locate_red_region_fixture
 from src.perception.vl_region import region3d_to_dict
 from src.sim.gripper_model import DEFAULT_GRIPPER_MODEL, write_gripper_model
 from src.sim.gripper_pick_motion import plan_pick_trajectory_from_target_3d, simulate_pick
@@ -57,7 +57,7 @@ SCENES: dict[str, dict[str, Any]] = {
 
 
 MULTI_VIEW_DEFAULT_POSES = ("scan_high", "scan_front_high", "scan_left_high", "scan_right_high")
-VL_PROVIDERS = ("color_fixture", "manual_region", "codex_vision", "openai_vision", "ark_coding_vision")
+VL_PROVIDERS = ("color_fixture", "manual_region", "codex_vision", "openai_vision", "ark_coding_vision", "openrouter_vision")
 
 
 def get_robot_capabilities() -> dict[str, Any]:
@@ -273,7 +273,7 @@ def vl_locate_object_region(
             config_path=config_path,
         )
         provider_note = "openai_vision calls the OpenAI Responses API using config/vl_providers.local.json."
-    else:
+    elif provider == "ark_coding_vision":
         region = locate_ark_coding_vision_region(
             rgb_path,
             prompt=prompt,
@@ -283,6 +283,18 @@ def vl_locate_object_region(
         )
         provider_note = (
             "ark_coding_vision calls the Ark coding OpenAI-compatible chat-completions endpoint; "
+            "it uses config/vl_providers.local.json."
+        )
+    else:
+        region = locate_openrouter_vision_region(
+            rgb_path,
+            prompt=prompt,
+            output_path=overlay_path,
+            model=model,
+            config_path=config_path,
+        )
+        provider_note = (
+            "openrouter_vision calls the OpenRouter OpenAI-compatible chat-completions endpoint; "
             "it uses config/vl_providers.local.json."
         )
     region["overlay_path"] = _relative(Path(region["overlay_path"])) if region.get("overlay_path") else None
@@ -329,6 +341,14 @@ def _locate_region_from_observation(
         )
     elif provider == "ark_coding_vision":
         region = locate_ark_coding_vision_region(
+            rgb_path,
+            prompt=prompt,
+            output_path=overlay_path,
+            model=model,
+            config_path=config_path,
+        )
+    elif provider == "openrouter_vision":
+        region = locate_openrouter_vision_region(
             rgb_path,
             prompt=prompt,
             output_path=overlay_path,
@@ -487,7 +507,7 @@ def multi_view_vl_locate_object_3d(
         max_cluster_radius_m=max_cluster_radius_m,
     )
     accepted = [candidate for candidate in candidates if candidate["accepted"]]
-    required_accepted = max(int(min_accepted_views), 2 if provider in ("openai_vision", "ark_coding_vision") else 1)
+    required_accepted = max(int(min_accepted_views), 2 if provider in ("openai_vision", "ark_coding_vision", "openrouter_vision") else 1)
     if not accepted:
         return {
             "status": "failed",

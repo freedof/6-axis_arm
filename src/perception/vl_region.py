@@ -221,12 +221,13 @@ def locate_ark_coding_vision_region(
         instructions=instructions,
         user_text=user_text,
         timeout_s=timeout_s,
+        provider_name="Ark coding vision",
     )
     normalized = _normalize_region(raw_region, prompt=prompt, provider="ark_coding_vision", image_size=(width, height))
     normalized["model"] = selected_model
     normalized["base_url"] = endpoint.rsplit("/chat/completions", 1)[0]
     normalized["config_path"] = str(config_file)
-    normalized = _review_ark_region(
+    normalized = _review_chat_completion_region(
         endpoint=endpoint,
         api_key=key,
         model=selected_model,
@@ -235,9 +236,72 @@ def locate_ark_coding_vision_region(
         image_size=(width, height),
         region=normalized,
         timeout_s=timeout_s,
+        provider="ark_coding_vision",
+        provider_name="Ark coding vision",
     )
     if output_path is not None:
         overlay_path = _draw_region_overlay(rgb_path, normalized, output_path, label="Ark VL")
+        normalized["overlay_path"] = str(overlay_path)
+    return normalized
+
+
+def locate_openrouter_vision_region(
+    rgb_path: str | Path,
+    *,
+    prompt: str,
+    output_path: str | Path | None = None,
+    model: str | None = None,
+    api_key: str | None = None,
+    base_url: str | None = None,
+    config_path: str | Path | None = None,
+    timeout_s: float = 60.0,
+) -> dict[str, Any]:
+    """Call an OpenRouter OpenAI-compatible endpoint and return a bbox region."""
+    rgb_path = Path(rgb_path)
+    config, config_file = _provider_config("openrouter_vision", config_path)
+    key = api_key or str(config.get("api_key", ""))
+    if not key:
+        raise RuntimeError(f"api_key is required for provider='openrouter_vision' in {config_file}.")
+
+    selected_model = model or str(config.get("model", "google/gemini-3.5-flash"))
+    endpoint = _chat_completions_endpoint(base_url or str(config.get("base_url", "https://openrouter.ai/api/v1")))
+    image = Image.open(rgb_path).convert("RGB")
+    width, height = image.size
+    image_url = _image_data_url(rgb_path)
+    instructions = _robot_vl_localization_instructions(json_only=True)
+    user_text = (
+        f"Image size: width={width}, height={height}. "
+        f"Target request: {prompt}. "
+        "Return strict JSON only."
+    )
+    raw_region = _locate_ark_region_with_retry(
+        endpoint=endpoint,
+        api_key=key,
+        model=selected_model,
+        image_url=image_url,
+        instructions=instructions,
+        user_text=user_text,
+        timeout_s=timeout_s,
+        provider_name="OpenRouter vision",
+    )
+    normalized = _normalize_region(raw_region, prompt=prompt, provider="openrouter_vision", image_size=(width, height))
+    normalized["model"] = selected_model
+    normalized["base_url"] = endpoint.rsplit("/chat/completions", 1)[0]
+    normalized["config_path"] = str(config_file)
+    normalized = _review_chat_completion_region(
+        endpoint=endpoint,
+        api_key=key,
+        model=selected_model,
+        image_url=image_url,
+        prompt=prompt,
+        image_size=(width, height),
+        region=normalized,
+        timeout_s=timeout_s,
+        provider="openrouter_vision",
+        provider_name="OpenRouter vision",
+    )
+    if output_path is not None:
+        overlay_path = _draw_region_overlay(rgb_path, normalized, output_path, label="OpenRouter VL")
         normalized["overlay_path"] = str(overlay_path)
     return normalized
 
@@ -455,7 +519,7 @@ def _robot_vl_localization_instructions(*, json_only: bool = False) -> str:
     )
 
 
-def _review_ark_region(
+def _review_chat_completion_region(
     *,
     endpoint: str,
     api_key: str,
@@ -465,6 +529,8 @@ def _review_ark_region(
     image_size: tuple[int, int],
     region: dict[str, Any],
     timeout_s: float,
+    provider: str,
+    provider_name: str,
 ) -> dict[str, Any]:
     """Ask the VL provider to verify or correct its own bbox."""
     width, height = image_size
@@ -496,7 +562,7 @@ def _review_ark_region(
         ],
         "temperature": 0,
     }
-    response = _post_json(endpoint, payload, api_key=api_key, timeout_s=timeout_s, provider_name="Ark coding vision self-check")
+    response = _post_json(endpoint, payload, api_key=api_key, timeout_s=timeout_s, provider_name=f"{provider_name} self-check")
     review = json.loads(_extract_chat_completion_text(response))
     valid = bool(review.get("valid_bbox", False))
     corrected = review.get("corrected_bbox_xyxy", [])
@@ -508,7 +574,7 @@ def _review_ark_region(
             "confidence": float(review.get("confidence", region.get("confidence", 0.5))),
             "reasoning": str(review.get("reasoning", "")),
         }
-        normalized = _normalize_region(reviewed, prompt=prompt, provider="ark_coding_vision", image_size=image_size)
+        normalized = _normalize_region(reviewed, prompt=prompt, provider=provider, image_size=image_size)
         normalized["model"] = region.get("model", model)
         normalized["base_url"] = region.get("base_url")
         normalized["config_path"] = region.get("config_path")
@@ -542,6 +608,7 @@ def _locate_ark_region_with_retry(
     instructions: str,
     user_text: str,
     timeout_s: float,
+    provider_name: str,
     attempts: int = 2,
 ) -> dict[str, Any]:
     last_error: Exception | None = None
@@ -566,11 +633,11 @@ def _locate_ark_region_with_retry(
             "temperature": 0,
         }
         try:
-            response = _post_json(endpoint, payload, api_key=api_key, timeout_s=timeout_s, provider_name="Ark coding vision")
+            response = _post_json(endpoint, payload, api_key=api_key, timeout_s=timeout_s, provider_name=provider_name)
             return json.loads(_extract_chat_completion_text(response))
         except Exception as exc:
             last_error = exc
-    raise RuntimeError(f"Ark coding vision failed after {attempts} attempts: {last_error}") from last_error
+    raise RuntimeError(f"{provider_name} failed after {attempts} attempts: {last_error}") from last_error
 
 
 def _post_openai_response(payload: dict[str, Any], *, api_key: str, timeout_s: float) -> dict[str, Any]:
