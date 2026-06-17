@@ -49,7 +49,7 @@ def main() -> None:
 def _has_provider_key(provider: str) -> bool:
     if not CONFIG_PATH.exists():
         return False
-    data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+    data = json.loads(CONFIG_PATH.read_text(encoding="utf-8-sig"))
     config = data.get("providers", {}).get(provider, {})
     key = str(config.get("api_key", ""))
     return bool(key and not key.startswith("REPLACE_"))
