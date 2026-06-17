@@ -12,6 +12,7 @@ from src.sim.demo_xyz_joint_roundtrip import DEFAULT_MODEL
 
 
 DEFAULT_PLANNING_MODEL = ROOT / "assets" / "dobot_cr5" / "mjcf" / "cr5_planning.xml"
+DEFAULT_PICK_PLANNING_MODEL = ROOT / "assets" / "dobot_cr5" / "mjcf" / "cr5_gripper_pick_planning.xml"
 
 
 COLLISION_GEOMS: dict[str, list[dict[str, str]]] = {

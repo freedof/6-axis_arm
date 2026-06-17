@@ -65,7 +65,20 @@ shortcut 平滑
 时间参数化
 ```
 
-规划检查中会忽略旧 roundtrip 演示用的 `target_sphere` 和 `target_sphere_b`，否则它们会作为无关调试障碍物干扰夹爪末端。
+抓取规划使用独立的 pick planning 场景：
+
+```text
+assets/dobot_cr5/mjcf/cr5_gripper_pick_planning.xml
+```
+
+该场景从方块抓取场景派生，不包含旧 roundtrip 演示用的红蓝小球
+`target_sphere` / `target_sphere_b`。红蓝小球只保留在 roundtrip/RRT 验证
+场景中：
+
+```text
+assets/dobot_cr5/mjcf/cr5_simplified.xml
+assets/dobot_cr5/mjcf/cr5_planning.xml
+```
 
 ## MCP 工具
 

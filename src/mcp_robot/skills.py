@@ -27,15 +27,15 @@ from src.sim.verify_render_gifs import validate_gif
 
 SCENES: dict[str, dict[str, Any]] = {
     "cr5_simplified": {
-        "name": "CR5 simplified baseline",
+        "name": "CR5 simplified roundtrip target scene",
         "model_path": ROOT / "assets" / "dobot_cr5" / "mjcf" / "cr5_simplified.xml",
-        "description": "6-axis CR5 baseline model without a gripper.",
-        "dynamic_objects": [],
+        "description": "6-axis CR5 baseline scene with red/blue roundtrip target markers.",
+        "dynamic_objects": ["target_marker", "target_marker_b"],
     },
     "cr5_with_gripper": {
         "name": "CR5 with simplified parallel gripper",
         "model_path": DEFAULT_GRIPPER_MODEL,
-        "description": "Generated 8-actuator CR5 model with a simple parallel gripper.",
+        "description": "Generated 8-actuator CR5 model with a simple parallel gripper and no roundtrip target markers.",
         "dynamic_objects": [],
     },
     "gripper_pick_cube": {
@@ -61,6 +61,7 @@ def get_robot_capabilities() -> dict[str, Any]:
             "baseline": _relative(SCENES["cr5_simplified"]["model_path"]),
             "gripper": _relative(DEFAULT_GRIPPER_MODEL),
             "pick_scene": _relative(DEFAULT_PICK_MODEL),
+            "pick_planning": _relative(ROOT / "assets" / "dobot_cr5" / "mjcf" / "cr5_gripper_pick_planning.xml"),
             "gripper_d435i": _relative(DEFAULT_D435I_GRIPPER_MODEL),
             "pick_scene_d435i": _relative(DEFAULT_D435I_PICK_MODEL),
         },

@@ -19,8 +19,8 @@ from src.robot.ik import solve_ik_multi_start
 from src.robot.model import dobot_cr5_simplified
 from src.sim.demo_xyz_joint_roundtrip import READY_Q, TOOL_DOWN_ROTATION, make_tool_pose
 from src.sim.gripper_model import GRIPPER_OPEN_QPOS
-from src.sim.gripper_pick_scene import CUBE_CENTER, CUBE_HALF_SIZE
-from src.sim.planning_model import write_planning_model
+from src.sim.gripper_pick_scene import CUBE_CENTER, CUBE_HALF_SIZE, DEFAULT_PICK_MODEL, write_pick_scene_model
+from src.sim.planning_model import DEFAULT_PICK_PLANNING_MODEL, write_planning_model
 
 
 ROBOT_DOF = 6
@@ -123,11 +123,9 @@ def plan_pick_trajectory_from_target_3d(
     cube_center = cube_center_from_target_surface(target)
     poses = solve_pick_trajectory(cube_center)
     robot = dobot_cr5_simplified()
-    checker = MujocoCollisionChecker(
-        write_planning_model(),
-        robot,
-        ignored_geom_names=("target_sphere", "target_sphere_b"),
-    )
+    pick_scene_model = write_pick_scene_model(DEFAULT_PICK_MODEL)
+    pick_planning_model = write_planning_model(DEFAULT_PICK_PLANNING_MODEL, source_model=pick_scene_model)
+    checker = MujocoCollisionChecker(pick_planning_model, robot)
     singularity = SingularityChecker(robot)
 
     def state_valid(q: np.ndarray) -> bool:

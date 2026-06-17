@@ -38,7 +38,7 @@ def write_pick_scene_model(
         raise RuntimeError(f"Model has no worldbody: {source_model}")
 
     _tune_pick_actuators(root)
-    _hide_roundtrip_targets(world)
+    _remove_roundtrip_targets(world)
 
     if world.find("geom[@name='pick_table']") is None:
         ET.SubElement(
@@ -97,13 +97,16 @@ def _ensure_material(asset: ET.Element, name: str, rgba: str) -> None:
         ET.SubElement(asset, "material", {"name": name, "rgba": rgba})
 
 
-def _hide_roundtrip_targets(world: ET.Element) -> None:
-    for name in ("target_sphere", "target_sphere_b"):
-        geom = world.find(f".//geom[@name='{name}']")
-        if geom is not None:
-            geom.set("rgba", "0 0 0 0")
-            geom.set("contype", "0")
-            geom.set("conaffinity", "0")
+def _remove_roundtrip_targets(world: ET.Element) -> None:
+    target_body_names = {"target_marker", "target_marker_b"}
+    target_node_names = {"target_sphere", "target_sphere_b", "target_site", "target_site_b"}
+    for parent in world.iter():
+        for child in list(parent):
+            child_name = child.attrib.get("name", "")
+            if child.tag == "body" and child_name in target_body_names:
+                parent.remove(child)
+            elif child.tag in {"geom", "site"} and child_name in target_node_names:
+                parent.remove(child)
 
 
 def _tune_pick_actuators(root: ET.Element) -> None:

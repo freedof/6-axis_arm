@@ -19,6 +19,7 @@ def write_gripper_model(
     output_path: Path = DEFAULT_GRIPPER_MODEL,
     *,
     source_model: Path = DEFAULT_MODEL,
+    include_roundtrip_targets: bool = False,
 ) -> Path:
     tree = ET.parse(source_model)
     root = tree.getroot()
@@ -33,6 +34,8 @@ def write_gripper_model(
     world = root.find("worldbody")
     if world is None:
         raise RuntimeError(f"Model has no worldbody: {source_model}")
+    if not include_roundtrip_targets:
+        _remove_roundtrip_targets(world)
 
     link6 = _find_body(world, "Link6")
     if link6 is None:
@@ -168,6 +171,18 @@ def _finger_body(
 def _ensure_material(asset: ET.Element, name: str, rgba: str) -> None:
     if asset.find(f"material[@name='{name}']") is None:
         ET.SubElement(asset, "material", {"name": name, "rgba": rgba})
+
+
+def _remove_roundtrip_targets(world: ET.Element) -> None:
+    target_body_names = {"target_marker", "target_marker_b"}
+    target_node_names = {"target_sphere", "target_sphere_b", "target_site", "target_site_b"}
+    for parent in world.iter():
+        for child in list(parent):
+            child_name = child.attrib.get("name", "")
+            if child.tag == "body" and child_name in target_body_names:
+                parent.remove(child)
+            elif child.tag in {"geom", "site"} and child_name in target_node_names:
+                parent.remove(child)
 
 
 def _ensure_position_actuator(
