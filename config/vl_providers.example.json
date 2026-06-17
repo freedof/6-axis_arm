@@ -3,7 +3,7 @@
     "ark_coding_vision": {
       "api_key": "REPLACE_WITH_YOUR_ARK_CODING_API_KEY",
       "base_url": "https://ark.cn-beijing.volces.com/api/coding/v3",
-      "model": "glm-5.2"
+      "model": "doubao-seed-2.0-pro"
     },
     "openai_vision": {
       "api_key": "REPLACE_WITH_YOUR_OPENAI_API_KEY",

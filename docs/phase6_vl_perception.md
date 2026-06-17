@@ -163,7 +163,7 @@ MCP 调用示例：
     "ark_coding_vision": {
       "api_key": "你的 API Key",
       "base_url": "https://ark.cn-beijing.volces.com/api/coding/v3",
-      "model": "glm-5.2"
+      "model": "doubao-seed-2.0-pro"
     }
   }
 }
@@ -181,7 +181,7 @@ MCP 调用示例：
 {
   "prompt": "pick the red block",
   "provider": "ark_coding_vision",
-  "model": "glm-5.2",
+  "model": "doubao-seed-2.0-pro",
   "pose": "scan",
   "width": 424,
   "height": 240
@@ -194,7 +194,7 @@ MCP 调用示例：
 https://ark.cn-beijing.volces.com/api/coding/v3/chat/completions
 ```
 
-注意：如果当前 coding plan 下的 `glm-5.2` 不支持图像输入，验证脚本会返回接口错误。此时说明它可以用于编程模型，但不能直接作为本项目的 VL 视觉识别模型，需要换成支持视觉输入的模型或 endpoint。
+注意：当前已验证 `doubao-seed-2.0-pro` 可以接收图片并完成 VL 闭环。如果某个 coding plan 模型返回 `Model only support text input`，说明它可以用于编程模型，但不能直接作为本项目的 VL 视觉识别模型，需要换成支持视觉输入的模型或 endpoint。
 
 ## 深度反投影逻辑
 

@@ -104,7 +104,7 @@ vl_pick_cube
 {
   "prompt": "pick the red block",
   "provider": "ark_coding_vision",
-  "model": "glm-5.2",
+  "model": "doubao-seed-2.0-pro",
   "pose": "scan",
   "render_gif": true
 }
@@ -121,12 +121,13 @@ vl_pick_cube
 使用本地配置的 Ark coding plan 验证：
 
 ```powershell
-.venv\Scripts\python src\sim\verify_vl_planned_pick.py --provider ark_coding_vision --model glm-5.2
+.venv\Scripts\python src\sim\verify_vl_planned_pick.py --provider ark_coding_vision --model doubao-seed-2.0-pro
 ```
 
-这一步是可选真实 provider 验证。若服务返回 `Model only support text input`，
-说明当前选择的 coding 模型不能接收图片，不能作为本项目的 VL provider；此时需要
-换成支持图像输入的模型或 endpoint。
+这一步是可选真实 provider 验证。当前已验证 `doubao-seed-2.0-pro` 可以接收
+图片并完成闭环。如果服务返回 `Model only support text input`，说明当前选择的
+coding 模型不能接收图片，不能作为本项目的 VL provider；此时需要换成支持图像
+输入的模型或 endpoint。
 
 验证脚本会输出：
 

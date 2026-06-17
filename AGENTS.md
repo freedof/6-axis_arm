@@ -125,7 +125,7 @@ Optional real-provider validation, only when the selected model supports image
 input:
 
 ```powershell
-.venv\Scripts\python src\sim\verify_vl_planned_pick.py --provider ark_coding_vision --model glm-5.2
+.venv\Scripts\python src\sim\verify_vl_planned_pick.py --provider ark_coding_vision --model doubao-seed-2.0-pro
 ```
 
 Run and verify the local CR5 MCP server:

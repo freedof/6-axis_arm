@@ -407,7 +407,7 @@ def _provider_config(provider: str, config_path: str | Path | None) -> tuple[dic
             "Copy config/vl_providers.example.json to config/vl_providers.local.json and fill in your API key."
         )
 
-    data = json.loads(path.read_text(encoding="utf-8"))
+    data = json.loads(path.read_text(encoding="utf-8-sig"))
     providers = data.get("providers")
     if not isinstance(providers, dict):
         raise RuntimeError(f"VL provider config must contain an object field named 'providers': {path}")
