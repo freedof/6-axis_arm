@@ -27,6 +27,9 @@ ROBOT_DOF = 6
 GRIPPER_DOF = 2
 GRASP_CENTER_OFFSET = 0.072
 GRASP_CENTER_Z_LIFT = 0.070
+READY_CENTER_OFFSET = np.array([-0.090, -0.150, 0.185], dtype=float)
+ABOVE_CENTER_Z_LIFT = 0.120
+LIFT_CENTER_Z_LIFT = 0.150
 GRIPPER_CLOSED_QPOS = 0.0
 PLANNED_PICK_READY_DWELL_SECONDS = 0.6
 PLANNED_PICK_ABOVE_DWELL_SECONDS = 0.4
@@ -113,13 +116,15 @@ def solve_pick_trajectory(cube_center: np.ndarray = np.array(CUBE_CENTER, dtype=
     seeds = [READY_Q]
     cube_center = np.asarray(cube_center, dtype=float)
     grasp_center = cube_center + np.array([0.0, 0.0, GRASP_CENTER_Z_LIFT], dtype=float)
-    above_center = cube_center + np.array([0.0, 0.0, 0.120], dtype=float)
-    lift_center = cube_center + np.array([0.0, 0.0, 0.150], dtype=float)
+    above_center = cube_center + np.array([0.0, 0.0, ABOVE_CENTER_Z_LIFT], dtype=float)
+    lift_center = cube_center + np.array([0.0, 0.0, LIFT_CENTER_Z_LIFT], dtype=float)
+    ready_center = cube_center + READY_CENTER_OFFSET
 
-    q_above = _solve_gripper_center_pose(robot, above_center, seeds)
+    q_ready = _solve_gripper_center_pose(robot, ready_center, seeds)
+    q_above = _solve_gripper_center_pose(robot, above_center, [q_ready, READY_Q])
     q_grasp = _solve_gripper_center_pose(robot, grasp_center, [q_above, READY_Q])
     q_lift = _solve_gripper_center_pose(robot, lift_center, [q_grasp, q_above, READY_Q])
-    return PickTrajectory(READY_Q.copy(), q_above, q_grasp, q_lift)
+    return PickTrajectory(q_ready, q_above, q_grasp, q_lift)
 
 
 def plan_pick_trajectory_from_target_3d(

@@ -32,10 +32,10 @@ def configure_camera() -> mujoco.MjvCamera:
     camera = mujoco.MjvCamera()
     mujoco.mjv_defaultCamera(camera)
     camera.type = mujoco.mjtCamera.mjCAMERA_FREE
-    camera.lookat[:] = np.array([0.35, -0.55, 0.16], dtype=float)
-    camera.distance = 0.82
+    camera.lookat[:] = np.array([0.35, -0.55, 0.18], dtype=float)
+    camera.distance = 0.96
     camera.azimuth = 138.0
-    camera.elevation = -24.0
+    camera.elevation = -22.0
     return camera
 
 
