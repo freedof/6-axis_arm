@@ -3,7 +3,6 @@ from __future__ import annotations
 import base64
 from dataclasses import dataclass
 import json
-import os
 from pathlib import Path
 from typing import Any
 import urllib.error
@@ -11,6 +10,10 @@ import urllib.request
 
 import numpy as np
 from PIL import Image, ImageDraw
+
+
+ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_PROVIDER_CONFIG_PATH = ROOT / "config" / "vl_providers.local.json"
 
 
 @dataclass(frozen=True)
@@ -106,15 +109,17 @@ def locate_openai_vision_region(
     output_path: str | Path | None = None,
     model: str | None = None,
     api_key: str | None = None,
+    config_path: str | Path | None = None,
     timeout_s: float = 60.0,
 ) -> dict[str, Any]:
     """Call an OpenAI vision model and return a normalized bbox region."""
     rgb_path = Path(rgb_path)
-    key = api_key or os.environ.get("OPENAI_API_KEY")
+    config, config_file = _provider_config("openai_vision", config_path)
+    key = api_key or str(config.get("api_key", ""))
     if not key:
-        raise RuntimeError("OPENAI_API_KEY is required for provider='openai_vision'.")
+        raise RuntimeError(f"api_key is required for provider='openai_vision' in {config_file}.")
 
-    selected_model = model or os.environ.get("OPENAI_VL_MODEL", "gpt-5.5")
+    selected_model = model or str(config.get("model", "gpt-5.5"))
     image = Image.open(rgb_path).convert("RGB")
     width, height = image.size
     image_url = _image_data_url(rgb_path)
@@ -154,6 +159,7 @@ def locate_openai_vision_region(
     raw_region = json.loads(_extract_response_text(response))
     normalized = _normalize_region(raw_region, prompt=prompt, provider="openai_vision", image_size=(width, height))
     normalized["model"] = selected_model
+    normalized["config_path"] = str(config_file)
     if output_path is not None:
         overlay_path = _draw_region_overlay(rgb_path, normalized, output_path, label="OpenAI VL")
         normalized["overlay_path"] = str(overlay_path)
@@ -168,17 +174,19 @@ def locate_ark_coding_vision_region(
     model: str | None = None,
     api_key: str | None = None,
     base_url: str | None = None,
+    config_path: str | Path | None = None,
     timeout_s: float = 60.0,
 ) -> dict[str, Any]:
     """Call an OpenAI-compatible Ark coding endpoint and return a bbox region."""
     rgb_path = Path(rgb_path)
-    key = api_key or os.environ.get("ARK_CODING_API_KEY") or os.environ.get("ARK_API_KEY")
+    config, config_file = _provider_config("ark_coding_vision", config_path)
+    key = api_key or str(config.get("api_key", ""))
     if not key:
-        raise RuntimeError("ARK_CODING_API_KEY or ARK_API_KEY is required for provider='ark_coding_vision'.")
+        raise RuntimeError(f"api_key is required for provider='ark_coding_vision' in {config_file}.")
 
-    selected_model = model or os.environ.get("ARK_CODING_VL_MODEL", "glm-5.2")
+    selected_model = model or str(config.get("model", "glm-5.2"))
     endpoint = _chat_completions_endpoint(
-        base_url or os.environ.get("ARK_CODING_BASE_URL", "https://ark.cn-beijing.volces.com/api/coding/v3")
+        base_url or str(config.get("base_url", "https://ark.cn-beijing.volces.com/api/coding/v3"))
     )
     image = Image.open(rgb_path).convert("RGB")
     width, height = image.size
@@ -214,6 +222,7 @@ def locate_ark_coding_vision_region(
     normalized = _normalize_region(raw_region, prompt=prompt, provider="ark_coding_vision", image_size=(width, height))
     normalized["model"] = selected_model
     normalized["base_url"] = endpoint.rsplit("/chat/completions", 1)[0]
+    normalized["config_path"] = str(config_file)
     if output_path is not None:
         overlay_path = _draw_region_overlay(rgb_path, normalized, output_path, label="Ark VL")
         normalized["overlay_path"] = str(overlay_path)
@@ -387,6 +396,27 @@ def _image_data_url(path: Path) -> str:
     mime = "image/png" if path.suffix.lower() == ".png" else "image/jpeg"
     data = base64.b64encode(path.read_bytes()).decode("ascii")
     return f"data:{mime};base64,{data}"
+
+
+def _provider_config(provider: str, config_path: str | Path | None) -> tuple[dict[str, Any], Path]:
+    path = Path(config_path) if config_path is not None else DEFAULT_PROVIDER_CONFIG_PATH
+    if not path.is_absolute():
+        path = ROOT / path
+    if not path.exists():
+        raise RuntimeError(
+            f"VL provider config file not found: {path}. "
+            "Copy config/vl_providers.example.json to config/vl_providers.local.json and fill in your API key."
+        )
+
+    data = json.loads(path.read_text(encoding="utf-8"))
+    providers = data.get("providers")
+    if not isinstance(providers, dict):
+        raise RuntimeError(f"VL provider config must contain an object field named 'providers': {path}")
+
+    config = providers.get(provider)
+    if not isinstance(config, dict):
+        raise RuntimeError(f"VL provider '{provider}' is not configured in {path}")
+    return config, path
 
 
 def _post_openai_response(payload: dict[str, Any], *, api_key: str, timeout_s: float) -> dict[str, Any]:

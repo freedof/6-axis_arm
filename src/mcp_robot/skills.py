@@ -227,6 +227,7 @@ def vl_locate_object_region(
     provider: str = "color_fixture",
     manual_region: dict[str, Any] | None = None,
     model: str | None = None,
+    config_path: str | Path | None = None,
     width: int = 424,
     height: int = 240,
     seed: int = 7,
@@ -247,13 +248,25 @@ def vl_locate_object_region(
         region = locate_manual_region(manual_region, prompt=prompt, rgb_path=rgb_path, output_path=overlay_path)
         provider_note = "manual_region uses caller-provided coordinates for debugging and repeatable acceptance checks."
     elif provider == "openai_vision":
-        region = locate_openai_vision_region(rgb_path, prompt=prompt, output_path=overlay_path, model=model)
-        provider_note = "openai_vision calls the OpenAI Responses API; it requires OPENAI_API_KEY."
+        region = locate_openai_vision_region(
+            rgb_path,
+            prompt=prompt,
+            output_path=overlay_path,
+            model=model,
+            config_path=config_path,
+        )
+        provider_note = "openai_vision calls the OpenAI Responses API using config/vl_providers.local.json."
     else:
-        region = locate_ark_coding_vision_region(rgb_path, prompt=prompt, output_path=overlay_path, model=model)
+        region = locate_ark_coding_vision_region(
+            rgb_path,
+            prompt=prompt,
+            output_path=overlay_path,
+            model=model,
+            config_path=config_path,
+        )
         provider_note = (
             "ark_coding_vision calls the Ark coding OpenAI-compatible chat-completions endpoint; "
-            "it requires ARK_CODING_API_KEY or ARK_API_KEY."
+            "it uses config/vl_providers.local.json."
         )
     region["overlay_path"] = _relative(Path(region["overlay_path"])) if region.get("overlay_path") else None
     return {
@@ -296,6 +309,7 @@ def vl_locate_object_3d(
     provider: str = "color_fixture",
     manual_region: dict[str, Any] | None = None,
     model: str | None = None,
+    config_path: str | Path | None = None,
     width: int = 424,
     height: int = 240,
     seed: int = 7,
@@ -307,6 +321,7 @@ def vl_locate_object_3d(
         provider=provider,
         manual_region=manual_region,
         model=model,
+        config_path=config_path,
         width=width,
         height=height,
         seed=seed,

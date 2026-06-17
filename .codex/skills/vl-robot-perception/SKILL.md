@@ -23,8 +23,9 @@ Use this skill for the `F:\6-axis arm` project when the user asks Codex to find 
 2. Choose the provider.
    - `color_fixture`: deterministic local validation for the red cube.
    - `manual_region`: Codex inspects the image in the conversation and supplies bbox/point coordinates.
-   - `openai_vision`: calls the OpenAI Responses API; requires `OPENAI_API_KEY`.
-   - `ark_coding_vision`: calls the Ark coding OpenAI-compatible endpoint; requires `ARK_CODING_API_KEY` or `ARK_API_KEY`.
+   - `openai_vision`: calls the OpenAI Responses API using `config/vl_providers.local.json`.
+   - `ark_coding_vision`: calls the Ark coding OpenAI-compatible endpoint using `config/vl_providers.local.json`.
+   - To configure real providers, copy `config/vl_providers.example.json` to `config/vl_providers.local.json` and fill in the API key. Do not commit the local file.
 
 3. For Codex-in-the-loop VL, inspect the RGB image and return a manual region.
    - Prefer bbox for rectangular objects:
@@ -92,7 +93,7 @@ Use this skill for the `F:\6-axis arm` project when the user asks Codex to find 
    - Include the overlay path.
    - Include bbox/point, 3D world target, depth value, and valid depth pixel count.
    - State whether the provider was `color_fixture`, `manual_region`, `openai_vision`, or `ark_coding_vision`.
-   - If a real provider was skipped because no API key exists, say so plainly.
+   - If a real provider was skipped because no local config/API key exists, say so plainly.
 
 ## Validation
 
@@ -110,18 +111,18 @@ Optional real-provider validation:
 .venv\Scripts\python src\sim\verify_ark_coding_vl_provider.py
 ```
 
-Expected no-key behavior:
+Expected no-config behavior:
 
 ```text
 status: SKIPPED
-reason: OPENAI_API_KEY is not set; openai_vision provider was not called.
+reason: config/vl_providers.local.json is missing or openai_vision.api_key is not set.
 ```
 
-Expected Ark no-key behavior:
+Expected Ark no-config behavior:
 
 ```text
 status: SKIPPED
-reason: ARK_CODING_API_KEY/ARK_API_KEY is not set; ark_coding_vision provider was not called.
+reason: config/vl_providers.local.json is missing or ark_coding_vision.api_key is not set.
 ```
 
 ## Interpretation Rules

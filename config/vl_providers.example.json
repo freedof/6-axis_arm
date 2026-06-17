@@ -1,0 +1,13 @@
+{
+  "providers": {
+    "ark_coding_vision": {
+      "api_key": "REPLACE_WITH_YOUR_ARK_CODING_API_KEY",
+      "base_url": "https://ark.cn-beijing.volces.com/api/coding/v3",
+      "model": "glm-5.2"
+    },
+    "openai_vision": {
+      "api_key": "REPLACE_WITH_YOUR_OPENAI_API_KEY",
+      "model": "gpt-5.5"
+    }
+  }
+}

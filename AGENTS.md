@@ -343,9 +343,10 @@ small numerical contact tolerance for the intended endpoint contact.
   `docs/phase6_vl_perception.md`. The current local `color_fixture` provider
   is only an integration-test stand-in. `manual_region` is available for
   caller-provided bbox/point debugging. `openai_vision` calls the OpenAI
-  Responses API when `OPENAI_API_KEY` is set. `ark_coding_vision` calls the Ark
-  coding OpenAI-compatible endpoint when `ARK_CODING_API_KEY` or `ARK_API_KEY`
-  is set. Real VL providers should return the same region schema and let
+  Responses API. `ark_coding_vision` calls the Ark coding OpenAI-compatible
+  endpoint. Real provider credentials and model settings are read from
+  `config/vl_providers.local.json`, using `config/vl_providers.example.json` as
+  the template. Real VL providers should return the same region schema and let
   depth/camera geometry compute 3D target points.
 - The first local MCP server lives in `src/mcp_robot/server.py`. It exposes
   high-level tools such as `get_robot_capabilities`, `get_scene_state`, and

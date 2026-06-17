@@ -256,7 +256,7 @@ vl_locate_object_3d
 
 输入 RGB 图像和文本目标意图，返回 VL 风格的 2D 区域。
 
-当前支持三种 provider：
+当前支持四种 provider：
 
 ```text
 color_fixture
@@ -265,7 +265,15 @@ openai_vision
 ark_coding_vision
 ```
 
-`color_fixture` 用于本地可重复测试；`manual_region` 用于调用方手动传入 bbox/point；`openai_vision` 会调用 OpenAI Responses API，需要设置 `OPENAI_API_KEY`；`ark_coding_vision` 会调用火山方舟 coding plan 的 OpenAI-compatible chat-completions endpoint，需要设置 `ARK_CODING_API_KEY` 或 `ARK_API_KEY`。
+`color_fixture` 用于本地可重复测试；`manual_region` 用于调用方手动传入 bbox/point；`openai_vision` 会调用 OpenAI Responses API；`ark_coding_vision` 会调用火山方舟 coding plan 的 OpenAI-compatible chat-completions endpoint。真实 provider 的 API Key、Base URL、模型名从 `config/vl_providers.local.json` 读取。
+
+首次配置：
+
+```powershell
+Copy-Item config\vl_providers.example.json config\vl_providers.local.json
+```
+
+然后把 `config/vl_providers.local.json` 中的 `api_key` 改成自己的 key。该本地文件已被 `.gitignore` 忽略。
 
 典型调用：
 
@@ -305,12 +313,16 @@ ark_coding_vision
 }
 ```
 
-对应环境变量：
+对应本地配置文件：
 
-```powershell
-$env:ARK_CODING_API_KEY="你的 API Key"
-$env:ARK_CODING_BASE_URL="https://ark.cn-beijing.volces.com/api/coding/v3"
-$env:ARK_CODING_VL_MODEL="glm-5.2"
+```text
+config/vl_providers.local.json
+```
+
+参考模板：
+
+```text
+config/vl_providers.example.json
 ```
 
 手动区域调试示例：

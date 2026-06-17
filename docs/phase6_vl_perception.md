@@ -16,7 +16,7 @@ D435i RGB 图像
 
 ## 重要说明
 
-当前仓库支持三种 provider：
+当前仓库支持四种 provider：
 
 ```text
 color_fixture   本地颜色规则，用于可重复自动测试
@@ -30,6 +30,20 @@ ark_coding_vision  调用火山方舟 coding plan 的 OpenAI-compatible 接口
 ```text
 src/perception/vl_region.py
 ```
+
+真实 provider 的配置方式：
+
+```powershell
+Copy-Item config\vl_providers.example.json config\vl_providers.local.json
+```
+
+然后编辑：
+
+```text
+config/vl_providers.local.json
+```
+
+`vl_providers.local.json` 包含 API Key，已被 `.gitignore` 忽略，不要提交到仓库。
 
 `color_fixture` 会在 RGB 图中用颜色规则找到红色方块，并返回与真实 VL 模型一致的区域结构。它的作用不是替代 VL，而是先把下面这些接口固定住：
 
@@ -88,14 +102,19 @@ mask 的效果通常会比 bbox 更好，因为 bbox 内可能包含桌面、夹
 
 真实 provider 使用 OpenAI Responses API。根据 OpenAI 官方文档，Responses API 支持 `input_image` 图像输入，也支持通过 `text.format` 使用 JSON schema 结构化输出。
 
-环境变量：
+配置文件：
 
-```powershell
-$env:OPENAI_API_KEY="sk-..."
-$env:OPENAI_VL_MODEL="gpt-5.5"
+```text
+config/vl_providers.local.json
 ```
 
-`OPENAI_VL_MODEL` 可选，默认值为 `gpt-5.5`。如果后续想控制成本或延迟，可以把它换成账号可用的视觉模型。
+参考模板：
+
+```text
+config/vl_providers.example.json
+```
+
+`model` 可选，默认值为 `gpt-5.5`。如果后续想控制成本或延迟，可以把它换成账号可用的视觉模型。
 
 MCP 调用示例：
 
@@ -106,6 +125,14 @@ MCP 调用示例：
   "pose": "scan",
   "width": 424,
   "height": 240
+}
+```
+
+如果要使用非默认配置文件，可以额外传：
+
+```json
+{
+  "config_path": "config/vl_providers.local.json"
 }
 ```
 
@@ -130,16 +157,22 @@ MCP 调用示例：
 
 默认配置来自当前 coding plan 页面：
 
-```powershell
-$env:ARK_CODING_API_KEY="你的 API Key"
-$env:ARK_CODING_BASE_URL="https://ark.cn-beijing.volces.com/api/coding/v3"
-$env:ARK_CODING_VL_MODEL="glm-5.2"
+```json
+{
+  "providers": {
+    "ark_coding_vision": {
+      "api_key": "你的 API Key",
+      "base_url": "https://ark.cn-beijing.volces.com/api/coding/v3",
+      "model": "glm-5.2"
+    }
+  }
+}
 ```
 
-也可以使用兼容变量名：
+本地配置文件路径：
 
-```powershell
-$env:ARK_API_KEY="你的 API Key"
+```text
+config/vl_providers.local.json
 ```
 
 MCP 调用示例：
@@ -236,15 +269,15 @@ status: OK
 `verify_openai_vl_provider.py` 是可选真实模型验证：
 
 ```text
-未设置 OPENAI_API_KEY: status SKIPPED
-已设置 OPENAI_API_KEY: 调用 openai_vision，生成 OpenAI VL overlay，并检查 depth 反投影
+未配置 config/vl_providers.local.json 或 openai_vision.api_key: status SKIPPED
+已配置 openai_vision.api_key: 调用 openai_vision，生成 OpenAI VL overlay，并检查 depth 反投影
 ```
 
 `verify_ark_coding_vl_provider.py` 是可选 coding plan 验证：
 
 ```text
-未设置 ARK_CODING_API_KEY/ARK_API_KEY: status SKIPPED
-已设置 API key: 调用 ark_coding_vision，生成 Ark VL overlay，并检查 depth 反投影
+未配置 config/vl_providers.local.json 或 ark_coding_vision.api_key: status SKIPPED
+已配置 ark_coding_vision.api_key: 调用 ark_coding_vision，生成 Ark VL overlay，并检查 depth 反投影
 ```
 
 ## MCP 工具

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import os
+import json
 from pathlib import Path
 import sys
 
@@ -12,11 +12,13 @@ from src.perception.vl_region import estimate_region_3d, locate_openai_vision_re
 from src.sim.d435i_model import DEFAULT_D435I_PICK_MODEL, write_d435i_pick_scene_model
 from src.sim.render_d435i_preview import DEFAULT_OUTPUT_DIR, render_preview
 
+CONFIG_PATH = ROOT / "config" / "vl_providers.local.json"
+
 
 def main() -> None:
-    if not os.environ.get("OPENAI_API_KEY"):
+    if not _has_provider_key("openai_vision"):
         print("status: SKIPPED")
-        print("reason: OPENAI_API_KEY is not set; openai_vision provider was not called.")
+        print("reason: config/vl_providers.local.json is missing or openai_vision.api_key is not set.")
         return
 
     model_path = write_d435i_pick_scene_model(DEFAULT_D435I_PICK_MODEL)
@@ -42,6 +44,15 @@ def main() -> None:
     print("region:", region)
     print("region_3d:", region3d_to_dict(region3d))
     print("status: OK")
+
+
+def _has_provider_key(provider: str) -> bool:
+    if not CONFIG_PATH.exists():
+        return False
+    data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+    config = data.get("providers", {}).get(provider, {})
+    key = str(config.get("api_key", ""))
+    return bool(key and not key.startswith("REPLACE_"))
 
 
 if __name__ == "__main__":
