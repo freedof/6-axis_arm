@@ -22,7 +22,13 @@ PROTOCOL_VERSION = "2024-11-05"
 ToolHandler = Callable[[dict[str, Any]], dict[str, Any]]
 
 
+def _configure_stdio() -> None:
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
+
 def main() -> None:
+    _configure_stdio()
     server = RobotMcpServer()
     server.run()
 
@@ -36,6 +42,7 @@ class RobotMcpServer:
             "generate_gripper_model": lambda args: skills.generate_gripper_model(),
             "generate_pick_scene": lambda args: skills.generate_pick_scene(),
             "generate_multi_object_scene": self._generate_multi_object_scene,
+            "parse_language_goal": self._parse_language_goal,
             "generate_d435i_scene": lambda args: skills.generate_d435i_scene(),
             "render_d435i_preview": self._render_d435i_preview,
             "vl_locate_object_region": self._vl_locate_object_region,
@@ -139,6 +146,12 @@ class RobotMcpServer:
         return skills.generate_multi_object_scene(
             args.get("objects"),
             include_d435i=bool(args.get("include_d435i", True)),
+        )
+
+    def _parse_language_goal(self, args: dict[str, Any]) -> dict[str, Any]:
+        return skills.parse_language_goal(
+            str(args["instruction"]),
+            objects=args.get("objects"),
         )
 
     def _render_d435i_preview(self, args: dict[str, Any]) -> dict[str, Any]:
@@ -321,6 +334,21 @@ class RobotMcpServer:
                         },
                         "include_d435i": {"type": "boolean", "default": True},
                     }
+                ),
+            },
+            {
+                "name": "parse_language_goal",
+                "description": "Parse a Chinese or English tabletop manipulation instruction into action, target constraints, destination, and candidate objects.",
+                "inputSchema": _object_schema(
+                    {
+                        "instruction": {"type": "string"},
+                        "objects": {
+                            "type": "array",
+                            "description": "Optional scene object metadata. Defaults to the generated multi-object tabletop scene.",
+                            "items": {"type": "object"},
+                        },
+                    },
+                    required=["instruction"],
                 ),
             },
             {

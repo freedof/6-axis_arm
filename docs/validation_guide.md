@@ -131,6 +131,7 @@ docs/rrt_connect_test_report.md
 .venv\Scripts\python src\sim\verify_gripper_pick.py
 .venv\Scripts\python src\sim\verify_scene_separation.py
 .venv\Scripts\python src\sim\verify_multi_object_scene.py
+.venv\Scripts\python src\sim\verify_language_goal.py
 ```
 
 渲染抓取 GIF：
@@ -146,6 +147,8 @@ outputs/gripper_pick/simplified_gripper_pick_cube.gif
 ```
 
 抓取场景应与传统红/蓝圆球场景分离，不应包含 legacy roundtrip target spheres。多物体场景会额外生成不同颜色的 box/cylinder，并输出一组 D435i RGB/depth 预览，用于后续语言指令目标选择验证。
+
+语言目标解析测试覆盖中文/英文指令中的动作、颜色、形状、桌面区域和多候选歧义输出，确保后续 VL 只消费结构化目标约束。
 
 ## D435i RGB-D 相机
 

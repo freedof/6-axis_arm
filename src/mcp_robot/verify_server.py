@@ -33,6 +33,7 @@ def main() -> None:
             "get_robot_capabilities",
             "list_available_scenes",
             "get_scene_state",
+            "parse_language_goal",
             "pick_cube",
             "render_d435i_preview",
             "vl_locate_object_3d",
@@ -56,6 +57,8 @@ def main() -> None:
             raise RuntimeError("Capability response should include vl_pick_cube.")
         if "multi_view_vl_pick_cube" not in capabilities["available_skills"]:
             raise RuntimeError("Capability response should include multi_view_vl_pick_cube.")
+        if "parse_language_goal" not in capabilities["available_skills"]:
+            raise RuntimeError("Capability response should include parse_language_goal.")
 
         scene_state = _call_tool(process, 4, "get_scene_state", {"scene_id": "gripper_pick_cube"})
         if scene_state["objects"][0]["name"] != "grasp_cube":
@@ -65,6 +68,11 @@ def main() -> None:
         if d435i_state["sensors"][0]["name"] != "d435i_depth":
             raise RuntimeError("D435i scene state should expose d435i_depth.")
 
+        language_goal = _call_tool(process, 11, "parse_language_goal", {"instruction": "把绿色圆柱体放到桌面左侧"})
+        if language_goal["target"]["object_name"] != "green_cylinder":
+            raise RuntimeError(f"Language goal should resolve green_cylinder: {language_goal}")
+        if language_goal["destination"]["region"] != "left":
+            raise RuntimeError(f"Language goal should parse left table region: {language_goal}")
         d435i_preview = _call_tool(
             process,
             6,

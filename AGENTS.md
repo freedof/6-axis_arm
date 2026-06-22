@@ -87,6 +87,7 @@ Gripper, scene separation, D435i, and VL checks:
 .venv\Scripts\python src\sim\verify_gripper_pick.py
 .venv\Scripts\python src\sim\verify_scene_separation.py
 .venv\Scripts\python src\sim\verify_multi_object_scene.py
+.venv\Scripts\python src\sim\verify_language_goal.py
 .venv\Scripts\python src\sim\verify_d435i_camera.py
 .venv\Scripts\python src\sim\verify_vl_region.py
 ```

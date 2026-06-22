@@ -85,6 +85,33 @@ assets/dobot_cr5/mjcf/cr5_with_gripper.xml
 assets/dobot_cr5/mjcf/cr5_gripper_pick_scene.xml
 ```
 
+
+### generate_multi_object_scene
+
+生成多物体桌面场景，用于语言指令目标选择、VL 识别和后续抓取验证。默认包含不同颜色的方块与圆柱体，并可同时生成 D435i 相机场景。
+
+典型 MCP 调用参数：
+
+```json
+{
+  "include_d435i": true
+}
+```
+
+### parse_language_goal
+
+把中文或英文桌面操作指令解析为结构化目标：动作、目标颜色、目标形状、候选物体、放置区域和供 VL 使用的目标提示。
+
+典型 MCP 调用参数：
+
+```json
+{
+  "instruction": "把绿色圆柱体放到桌面左侧"
+}
+```
+
+返回结果中，`status=ok` 表示目标唯一；`status=ambiguous` 表示需要用户或上层策略继续消歧；`status=no_match` 表示当前场景没有匹配物体。
+
 ### simulate_pick_cube
 
 只运行动力学抓取仿真，不渲染 GIF。

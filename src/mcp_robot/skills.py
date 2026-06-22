@@ -16,6 +16,7 @@ from src.perception.vl_region import locate_ark_coding_vision_region
 from src.perception.vl_region import locate_codex_vision_region
 from src.perception.vl_region import locate_manual_region, locate_openai_vision_region, locate_openrouter_vision_region, locate_red_region_fixture
 from src.perception.vl_region import region3d_to_dict
+from src.perception.language_goal import parse_language_goal as parse_language_goal_instruction
 from src.sim.gripper_model import DEFAULT_GRIPPER_MODEL, write_gripper_model
 from src.sim.gripper_pick_motion import plan_pick_trajectory_from_target_3d, simulate_pick
 from src.sim.gripper_pick_scene import CUBE_HALF_SIZE, DEFAULT_MULTI_OBJECT_MODEL, DEFAULT_MULTI_OBJECT_SPECS, DEFAULT_PICK_MODEL, TABLE_TOP_Z, object_specs_from_config, object_specs_to_dicts, write_multi_object_scene_model, write_pick_scene_model
@@ -96,6 +97,7 @@ def get_robot_capabilities() -> dict[str, Any]:
             "generate_gripper_model",
             "generate_pick_scene",
             "generate_multi_object_scene",
+            "parse_language_goal",
             "simulate_pick_cube",
             "render_pick_cube_gif",
             "pick_cube",
@@ -233,6 +235,13 @@ def generate_multi_object_scene(objects: list[dict[str, Any]] | None = None, *, 
         response["camera_names"] = ["d435i_depth", "d435i_rgb"]
     return response
 
+
+def parse_language_goal(instruction: str, objects: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    scene_objects = object_specs_to_dicts(DEFAULT_MULTI_OBJECT_SPECS) if objects is None else objects
+    parsed = parse_language_goal_instruction(instruction, objects=scene_objects)
+    parsed["scene_id"] = "gripper_multi_object_d435i"
+    parsed["available_objects"] = scene_objects
+    return parsed
 
 def generate_d435i_scene() -> dict[str, Any]:
     model_path = write_d435i_pick_scene_model(DEFAULT_D435I_PICK_MODEL)
