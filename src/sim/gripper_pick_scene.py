@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
@@ -22,6 +22,17 @@ CUBE_HALF_SIZE = (0.016, 0.018, 0.030)
 CUBE_CENTER = (0.35, -0.55, TABLE_TOP_Z + CUBE_HALF_SIZE[2])
 DEFAULT_OBJECT_MASS = 0.020
 DEFAULT_OBJECT_FRICTION = (3.0, 0.08, 0.006)
+TRAY_CENTER = (0.55, -0.47)
+TRAY_HALF_SIZE = (0.115, 0.075, 0.006)
+TRAY_WALL_THICKNESS = 0.006
+TRAY_WALL_HEIGHT = 0.026
+TRAY_FLOOR_TOP_Z = TABLE_TOP_Z + TRAY_HALF_SIZE[2] * 2.0
+TRAY_PLACE_SLOTS = (
+    (0.52, -0.47),
+    (0.58, -0.47),
+    (0.55, -0.43),
+    (0.55, -0.51),
+)
 
 
 @dataclass(frozen=True)
@@ -47,7 +58,7 @@ class TableObjectSpec:
 DEFAULT_MULTI_OBJECT_SPECS = (
     TableObjectSpec("red_cube", "box", "red", (0.88, 0.16, 0.10, 1.0), (0.35, -0.55), (0.016, 0.018, 0.030)),
     TableObjectSpec("blue_cube", "box", "blue", (0.12, 0.32, 0.86, 1.0), (0.26, -0.51), (0.017, 0.017, 0.026)),
-    TableObjectSpec("green_cylinder", "cylinder", "green", (0.12, 0.64, 0.28, 1.0), (0.44, -0.50), (0.018, 0.028)),
+    TableObjectSpec("green_cylinder", "cylinder", "green", (0.12, 0.64, 0.28, 1.0), (0.39, -0.46), (0.018, 0.028)),
     TableObjectSpec("yellow_cylinder", "cylinder", "yellow", (0.95, 0.74, 0.12, 1.0), (0.29, -0.64), (0.016, 0.024)),
     TableObjectSpec("purple_cube", "box", "purple", (0.54, 0.22, 0.80, 1.0), (0.45, -0.63), (0.015, 0.019, 0.025)),
 )
@@ -72,6 +83,7 @@ def write_pick_scene_model(
             ),
         ),
         model_name="dobot_cr5_gripper_pick_scene",
+        include_tray=False,
     )
 
 
@@ -81,6 +93,7 @@ def write_multi_object_scene_model(
     source_model: Path = DEFAULT_GRIPPER_MODEL,
     objects: tuple[TableObjectSpec, ...] | list[TableObjectSpec] = DEFAULT_MULTI_OBJECT_SPECS,
     model_name: str = "dobot_cr5_gripper_multi_object_scene",
+    include_tray: bool = True,
 ) -> Path:
     write_gripper_model(source_model)
 
@@ -94,6 +107,8 @@ def write_multi_object_scene_model(
     asset = root.find("asset")
     if asset is not None:
         _ensure_material(asset, "pick_table_mat", "0.55 0.57 0.54 1")
+        if include_tray:
+            _ensure_material(asset, "tray_mat", "0.12 0.13 0.14 1")
         for spec in specs:
             _ensure_material(asset, f"{spec.name}_mat", _fmt_vec(spec.rgba))
 
@@ -104,6 +119,8 @@ def write_multi_object_scene_model(
     _tune_pick_actuators(root)
     _remove_roundtrip_targets(world)
     _add_pick_table(world)
+    if include_tray:
+        _add_tray(world)
     for spec in specs:
         _add_table_object(world, spec)
 
@@ -113,6 +130,17 @@ def write_multi_object_scene_model(
     tree.write(output_path, encoding="unicode")
     return output_path
 
+
+
+def tray_metadata() -> dict:
+    return {
+        "name": "tabletop_tray",
+        "center_xy_m": [round(TRAY_CENTER[0], 6), round(TRAY_CENTER[1], 6)],
+        "floor_top_z_m": round(TRAY_FLOOR_TOP_Z, 6),
+        "half_size_m": [round(value, 6) for value in TRAY_HALF_SIZE],
+        "wall_height_m": round(TRAY_WALL_HEIGHT, 6),
+        "place_slots_xy_m": [[round(x, 6), round(y, 6)] for x, y in TRAY_PLACE_SLOTS],
+    }
 
 def object_specs_from_config(objects: list[dict]) -> tuple[TableObjectSpec, ...]:
     specs = []
@@ -180,6 +208,47 @@ def _add_pick_table(world: ET.Element) -> None:
         },
     )
 
+
+
+def _add_tray(world: ET.Element) -> None:
+    cx, cy = TRAY_CENTER
+    base_z = TABLE_TOP_Z + TRAY_HALF_SIZE[2]
+    wall_z = TABLE_TOP_Z + TRAY_HALF_SIZE[2] * 2.0 + TRAY_WALL_HEIGHT / 2.0
+    ET.SubElement(
+        world,
+        "geom",
+        {
+            "name": "tabletop_tray_floor",
+            "type": "box",
+            "pos": f"{cx:g} {cy:g} {base_z:g}",
+            "size": _fmt_vec(TRAY_HALF_SIZE),
+            "material": "tray_mat",
+            "friction": "1.2 0.02 0.002",
+            "contype": "1",
+            "conaffinity": "1",
+        },
+    )
+    wall_specs = (
+        ("front", (cx + TRAY_HALF_SIZE[0], cy, wall_z), (TRAY_WALL_THICKNESS, TRAY_HALF_SIZE[1] + TRAY_WALL_THICKNESS, TRAY_WALL_HEIGHT / 2.0)),
+        ("back", (cx - TRAY_HALF_SIZE[0], cy, wall_z), (TRAY_WALL_THICKNESS, TRAY_HALF_SIZE[1] + TRAY_WALL_THICKNESS, TRAY_WALL_HEIGHT / 2.0)),
+        ("left", (cx, cy - TRAY_HALF_SIZE[1], wall_z), (TRAY_HALF_SIZE[0], TRAY_WALL_THICKNESS, TRAY_WALL_HEIGHT / 2.0)),
+        ("right", (cx, cy + TRAY_HALF_SIZE[1], wall_z), (TRAY_HALF_SIZE[0], TRAY_WALL_THICKNESS, TRAY_WALL_HEIGHT / 2.0)),
+    )
+    for suffix, pos, size in wall_specs:
+        ET.SubElement(
+            world,
+            "geom",
+            {
+                "name": f"tabletop_tray_wall_{suffix}",
+                "type": "box",
+                "pos": _fmt_vec(pos),
+                "size": _fmt_vec(size),
+                "material": "tray_mat",
+                "friction": "1.2 0.02 0.002",
+                "contype": "1",
+                "conaffinity": "1",
+            },
+        )
 
 def _add_table_object(world: ET.Element, spec: TableObjectSpec) -> None:
     body = ET.SubElement(
@@ -290,3 +359,4 @@ if __name__ == "__main__":
     multi_path = write_multi_object_scene_model()
     print(path)
     print(multi_path)
+    print(tray_metadata())

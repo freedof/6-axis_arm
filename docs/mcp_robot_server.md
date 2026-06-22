@@ -56,6 +56,8 @@ cr5_simplified
 cr5_with_gripper
 gripper_pick_cube
 gripper_pick_cube_d435i
+gripper_multi_object
+gripper_multi_object_d435i
 ```
 
 ### get_scene_state
@@ -88,7 +90,7 @@ assets/dobot_cr5/mjcf/cr5_gripper_pick_scene.xml
 
 ### generate_multi_object_scene
 
-生成多物体桌面场景，用于语言指令目标选择、VL 识别和后续抓取验证。默认包含不同颜色的方块与圆柱体，并可同时生成 D435i 相机场景。
+生成多物体桌面场景，用于语言指令目标选择、VL 识别和后续抓取验证。默认包含不同颜色的方块、圆柱体和桌面托盘，并可同时生成 D435i 相机场景。
 
 典型 MCP 调用参数：
 
@@ -106,7 +108,7 @@ assets/dobot_cr5/mjcf/cr5_gripper_pick_scene.xml
 
 ```json
 {
-  "instruction": "把绿色圆柱体放到桌面左侧"
+  "instruction": "把所有圆柱体夹到托盘中"
 }
 ```
 
@@ -134,15 +136,28 @@ assets/dobot_cr5/mjcf/cr5_gripper_pick_scene.xml
 默认验证指令：
 
 ```text
-把蓝色方块放到桌面右侧
+把蓝色方块放到托盘中
 ```
 
 验证 GIF 示例：
 
 ```text
-outputs/pick_place/multi_object_vl_pick_place/blue_cube_right_pick_place.gif
+outputs/pick_place/multi_object_vl_pick_place/blue_cube_tray_pick_place.gif
 ```
 
+
+集合指令示例：
+
+```text
+把所有圆柱体夹到托盘中
+```
+
+当前集合模式会将指令拆成多个单目标子任务，并为每个子任务生成一个 GIF，例如：
+
+```text
+outputs/pick_place/collect_cylinders_to_tray/gifs/01_green_cylinder.gif
+outputs/pick_place/collect_cylinders_to_tray/gifs/02_yellow_cylinder.gif
+```
 该工具返回 `automatic_precheck_passed` 仍只表示自动预检通过，最终是否接受需要用户查看 GIF 后确认。
 ### simulate_pick_cube
 

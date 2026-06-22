@@ -21,10 +21,11 @@ SHAPE_ALIASES: dict[str, tuple[str, ...]] = {
 ACTION_ALIASES: dict[str, tuple[str, ...]] = {
     "pick": ("pick", "grasp", "抓取", "夹取", "拿起", "抓起", "夹起", "抓起来", "夹起来"),
     "place": ("place", "put", "放到", "放在", "放置", "放下"),
-    "move": ("move", "移动到", "移到", "搬到", "拿到", "放到"),
+    "move": ("move", "移动到", "移到", "搬到", "拿到", "放到", "夹到"),
 }
 
 REGION_ALIASES: dict[str, tuple[str, ...]] = {
+    "tray": ("tray", "托盘", "盘子", "托盘中", "托盘里"),
     "left": ("left", "左侧", "左边", "左方"),
     "right": ("right", "右侧", "右边", "右方"),
     "front": ("front", "前方", "前面", "靠前"),
@@ -34,6 +35,8 @@ REGION_ALIASES: dict[str, tuple[str, ...]] = {
 
 TABLE_CENTER_XY_M = (0.35, -0.55)
 TABLE_REGION_OFFSET_M = 0.11
+TRAY_CENTER_XY_M = (0.55, -0.47)
+QUANTIFIER_ALL_ALIASES = ("所有", "全部", "全部的", "all", "every")
 
 
 @dataclass(frozen=True)
@@ -47,11 +50,7 @@ def parse_language_goal(
     *,
     objects: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Parse a natural-language tabletop manipulation instruction.
-
-    This layer is intentionally deterministic. It turns user wording into a
-    small target schema that the VL/depth pipeline can consume later.
-    """
+    """Parse a natural-language tabletop manipulation instruction."""
     if not instruction or not instruction.strip():
         raise ValueError("instruction must be a non-empty string.")
 
@@ -59,9 +58,10 @@ def parse_language_goal(
     color = _find_first(normalized, COLOR_ALIASES)
     shape = _find_first(normalized, SHAPE_ALIASES)
     region = _find_first(normalized, REGION_ALIASES)
+    quantifier = "all" if any(alias in normalized for alias in QUANTIFIER_ALL_ALIASES) else "one"
     action = _resolve_action(normalized, has_destination=region is not None)
     matched_objects = _match_objects(objects or [], color=color, shape=shape, instruction=normalized)
-    target = _target_payload(color=color, shape=shape, matched_objects=matched_objects)
+    target = _target_payload(color=color, shape=shape, matched_objects=matched_objects, quantifier=quantifier)
     destination = _destination_payload(region)
     ambiguities = _ambiguities(target, matched_objects)
     warnings = _warnings(target, matched_objects)
@@ -156,6 +156,7 @@ def _target_payload(
     color: ParsedToken | None,
     shape: ParsedToken | None,
     matched_objects: list[dict[str, Any]],
+    quantifier: str,
 ) -> dict[str, Any]:
     object_name = matched_objects[0]["name"] if len(matched_objects) == 1 else None
     return {
@@ -164,6 +165,8 @@ def _target_payload(
         "shape": shape.canonical if shape else None,
         "shape_text": shape.text if shape else None,
         "object_name": object_name,
+        "object_names": [item["name"] for item in matched_objects],
+        "quantifier": quantifier,
         "constraints": {
             "color": color.canonical if color else None,
             "shape": shape.canonical if shape else None,
@@ -177,6 +180,7 @@ def _destination_payload(region: ParsedToken | None) -> dict[str, Any] | None:
     x, y = TABLE_CENTER_XY_M
     offset = TABLE_REGION_OFFSET_M
     xy_by_region = {
+        "tray": list(TRAY_CENTER_XY_M),
         "left": [x, y - offset],
         "right": [x, y + offset],
         "front": [x + offset, y],
@@ -184,7 +188,7 @@ def _destination_payload(region: ParsedToken | None) -> dict[str, Any] | None:
         "center": [x, y],
     }
     return {
-        "type": "table_region",
+        "type": "tray" if region.canonical == "tray" else "table_region",
         "region": region.canonical,
         "region_text": region.text,
         "world_xy_m": [round(value, 6) for value in xy_by_region[region.canonical]],
@@ -195,7 +199,7 @@ def _ambiguities(target: dict[str, Any], matched_objects: list[dict[str, Any]]) 
     messages = []
     if target["color"] is None and target["shape"] is None:
         messages.append("未解析到颜色或形状，目标约束不足。")
-    if len(matched_objects) > 1:
+    if len(matched_objects) > 1 and target.get("quantifier") != "all":
         names = ", ".join(str(item["name"]) for item in matched_objects)
         messages.append(f"目标约束匹配到多个物体: {names}。")
     return messages
@@ -210,10 +214,12 @@ def _warnings(target: dict[str, Any], matched_objects: list[dict[str, Any]]) -> 
 def _build_vl_prompt(target: dict[str, Any]) -> str:
     color = target["color"] or "specified"
     shape = target["shape"] or "object"
-    if shape == "box":
-        shape_text = "box/cube"
-    else:
-        shape_text = shape
+    shape_text = "box/cube" if shape == "box" else shape
+    if target.get("quantifier") == "all":
+        return (
+            f"Locate one visible {color} {shape_text} target object on the tabletop. "
+            "Return one tight bbox around only one matching object; do not include the table or gripper."
+        )
     return (
         f"Locate the {color} {shape_text} on the tabletop. "
         "Return one tight bbox around the visible target object only; do not include the table or gripper."

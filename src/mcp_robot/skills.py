@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -20,7 +20,7 @@ from src.perception.language_goal import parse_language_goal as parse_language_g
 from src.sim.gripper_model import DEFAULT_GRIPPER_MODEL, write_gripper_model
 from src.sim.gripper_pick_motion import plan_pick_trajectory_from_target_3d, simulate_pick
 from src.sim.pick_place_motion import pick_place_required_frames, pick_place_segments, plan_pick_place_trajectory, simulate_pick_place
-from src.sim.gripper_pick_scene import CUBE_HALF_SIZE, DEFAULT_MULTI_OBJECT_MODEL, DEFAULT_MULTI_OBJECT_SPECS, DEFAULT_PICK_MODEL, TABLE_TOP_Z, object_specs_from_config, object_specs_to_dicts, write_multi_object_scene_model, write_pick_scene_model
+from src.sim.gripper_pick_scene import CUBE_HALF_SIZE, DEFAULT_MULTI_OBJECT_MODEL, DEFAULT_MULTI_OBJECT_SPECS, DEFAULT_PICK_MODEL, TABLE_TOP_Z, TRAY_FLOOR_TOP_Z, TRAY_PLACE_SLOTS, object_specs_from_config, object_specs_to_dicts, tray_metadata, write_multi_object_scene_model, write_pick_scene_model
 from src.sim.d435i_model import DEFAULT_D435I_GRIPPER_MODEL, DEFAULT_D435I_MULTI_OBJECT_MODEL, DEFAULT_D435I_PICK_MODEL, write_d435i_multi_object_scene_model, write_d435i_pick_scene_model
 from src.sim.render_d435i_preview import DEFAULT_OUTPUT_DIR as DEFAULT_D435I_OUTPUT_DIR
 from src.sim.render_d435i_preview import POSE_CHOICES
@@ -112,6 +112,8 @@ def get_robot_capabilities() -> dict[str, Any]:
             "vl_pick_cube",
             "multi_view_vl_locate_object_3d",
             "multi_view_vl_pick_cube",
+            "multi_object_vl_locate",
+            "language_multi_view_pick_and_place",
         ],
         "validation_policy": "automatic pre-check passed; waiting for user GIF confirmation",
     }
@@ -183,7 +185,8 @@ def get_scene_state(scene_id: str = "gripper_pick_cube") -> dict[str, Any]:
                 "name": "pick_table",
                 "top_z_m": TABLE_TOP_Z,
                 "friction": [1.0, 0.02, 0.002],
-            }
+            },
+            "tray": tray_metadata(),
         }
     if scene_id in ("gripper_pick_cube_d435i", "gripper_multi_object_d435i"):
         state["sensors"] = [
@@ -732,7 +735,33 @@ def language_multi_view_pick_and_place(
     height: int = 720,
     show_sites: bool = False,
     depth_variant: str = "raw",
+    _place_slot_index: int = 0,
 ) -> dict[str, Any]:
+    pre_parsed = parse_language_goal(instruction)
+    if pre_parsed.get("status") == "ok" and pre_parsed.get("target", {}).get("quantifier") == "all":
+        return _language_collection_pick_and_place(
+            instruction,
+            pre_parsed,
+            output_dir,
+            provider=provider,
+            manual_regions=manual_regions,
+            model=model,
+            config_path=config_path,
+            camera_width=camera_width,
+            camera_height=camera_height,
+            seed=seed,
+            poses=poses,
+            max_parallel_vl=max_parallel_vl,
+            min_accepted_views=min_accepted_views,
+            render_gif=render_gif,
+            output_path=output_path,
+            frames=frames,
+            fps=fps,
+            width=width,
+            height=height,
+            show_sites=show_sites,
+            depth_variant=depth_variant,
+        )
     located = multi_object_vl_locate(
         instruction,
         output_dir,
@@ -777,8 +806,9 @@ def language_multi_view_pick_and_place(
     model_path = write_multi_object_scene_model(DEFAULT_MULTI_OBJECT_MODEL)
     planned = plan_pick_place_trajectory(
         target_surface_world,
-        destination["world_xy_m"],
+        _destination_place_xy(destination, _place_slot_index),
         object_half_height=object_half_height,
+        placement_surface_z=_destination_surface_z(destination),
         source_model=model_path,
     )
     actual_frames = pick_place_required_frames(planned, frames=frames, fps=fps)
@@ -833,6 +863,151 @@ def language_multi_view_pick_and_place(
         response["gif"] = _relative(output)
     return response
 
+
+def _language_collection_pick_and_place(
+    instruction: str,
+    parsed: dict[str, Any],
+    output_dir: str | Path | None = None,
+    *,
+    provider: str,
+    manual_regions: dict[str, dict[str, Any]] | None,
+    model: str | None,
+    config_path: str | Path | None,
+    camera_width: int,
+    camera_height: int,
+    seed: int,
+    poses: list[str] | tuple[str, ...],
+    max_parallel_vl: int,
+    min_accepted_views: int,
+    render_gif: bool,
+    output_path: str | Path | None,
+    frames: int,
+    fps: int,
+    width: int,
+    height: int,
+    show_sites: bool,
+    depth_variant: str,
+) -> dict[str, Any]:
+    destination = parsed.get("destination")
+    target_names = list(parsed.get("target", {}).get("object_names") or [])
+    if not destination or destination.get("world_xy_m") is None:
+        return {
+            "status": "failed",
+            "scene_id": "gripper_multi_object_d435i",
+            "skill": "language_multi_view_pick_and_place",
+            "instruction": instruction,
+            "language_goal": parsed,
+            "reason": "collection pick-and-place requires a destination region in the instruction",
+            "user_acceptance": "pending",
+        }
+    if not target_names:
+        return {
+            "status": "failed",
+            "scene_id": "gripper_multi_object_d435i",
+            "skill": "language_multi_view_pick_and_place",
+            "instruction": instruction,
+            "language_goal": parsed,
+            "reason": "collection instruction did not resolve any target objects",
+            "user_acceptance": "pending",
+        }
+
+    base_output_dir = ROOT / "outputs" / "pick_place" / "collect_to_tray" if output_dir is None else Path(output_dir)
+    if not base_output_dir.is_absolute():
+        base_output_dir = ROOT / base_output_dir
+    subtasks = []
+    for index, name in enumerate(target_names):
+        target_object = _object_by_name(str(name))
+        sub_instruction = _single_object_instruction(target_object, destination)
+        sub_output_dir = base_output_dir / f"{index + 1:02d}_{target_object['name']}"
+        sub_output_path = _collection_gif_path(output_path, index, str(target_object["name"])) if render_gif else None
+        subtask = language_multi_view_pick_and_place(
+            sub_instruction,
+            sub_output_dir,
+            provider=provider,
+            manual_regions=manual_regions,
+            model=model,
+            config_path=config_path,
+            camera_width=camera_width,
+            camera_height=camera_height,
+            seed=seed + index,
+            poses=poses,
+            max_parallel_vl=max_parallel_vl,
+            min_accepted_views=min_accepted_views,
+            render_gif=render_gif,
+            output_path=sub_output_path,
+            frames=frames,
+            fps=fps,
+            width=width,
+            height=height,
+            show_sites=show_sites,
+            depth_variant=depth_variant,
+            _place_slot_index=index,
+        )
+        subtasks.append(subtask)
+
+    ok_count = sum(1 for item in subtasks if item.get("status") == "automatic_precheck_passed")
+    return {
+        "status": "automatic_precheck_passed" if ok_count == len(subtasks) else "failed",
+        "scene_id": "gripper_multi_object",
+        "skill": "language_multi_view_pick_and_place",
+        "mode": "collection",
+        "instruction": instruction,
+        "language_goal": parsed,
+        "destination": destination,
+        "target_count": len(target_names),
+        "successful_count": ok_count,
+        "subtasks": subtasks,
+        "gif_paths": [item["gif"] for item in subtasks if "gif" in item],
+        "user_acceptance": "pending",
+    }
+
+
+def _destination_place_xy(destination: dict[str, Any], slot_index: int = 0) -> list[float]:
+    if destination.get("type") == "tray":
+        x, y = TRAY_PLACE_SLOTS[slot_index % len(TRAY_PLACE_SLOTS)]
+        return [float(x), float(y)]
+    return [float(value) for value in destination["world_xy_m"]]
+
+
+def _destination_surface_z(destination: dict[str, Any]) -> float:
+    return float(TRAY_FLOOR_TOP_Z if destination.get("type") == "tray" else TABLE_TOP_Z)
+
+
+def _single_object_instruction(target_object: dict[str, Any], destination: dict[str, Any]) -> str:
+    color = _color_text_cn(str(target_object.get("color", "")))
+    shape = _shape_text_cn(str(target_object.get("shape", "")))
+    if destination.get("type") == "tray":
+        return f"把{color}{shape}放到托盘中"
+    region_text = str(destination.get("region_text") or destination.get("region") or "目标区域")
+    return f"把{color}{shape}放到{region_text}"
+
+
+def _color_text_cn(color: str) -> str:
+    return {
+        "red": "红色",
+        "blue": "蓝色",
+        "green": "绿色",
+        "yellow": "黄色",
+        "purple": "紫色",
+    }.get(color, color)
+
+
+def _shape_text_cn(shape: str) -> str:
+    return {
+        "box": "方块",
+        "cylinder": "圆柱体",
+    }.get(shape, shape)
+
+
+def _collection_gif_path(output_path: str | Path | None, index: int, object_name: str) -> Path:
+    if output_path is None:
+        return ROOT / "outputs" / "pick_place" / "collect_to_tray" / f"{index + 1:02d}_{object_name}.gif"
+    path = Path(output_path)
+    if not path.is_absolute():
+        path = ROOT / path
+    if path.suffix.lower() == ".gif":
+        return path.with_name(f"{path.stem}_{index + 1:02d}_{object_name}{path.suffix}")
+    return path / f"{index + 1:02d}_{object_name}.gif"
 def simulate_pick_cube(frames: int = 120, fps: int = 20) -> dict[str, Any]:
     model_path = write_pick_scene_model(DEFAULT_PICK_MODEL)
     result = simulate_pick(model_path, frames=frames, fps=fps)
@@ -1422,15 +1597,3 @@ def _resolve_output_dir(output_dir: str | Path | None, default_name: str) -> Pat
         output = ROOT / output
     output.mkdir(parents=True, exist_ok=True)
     return output
-
-
-
-
-
-
-
-
-
-
-
-

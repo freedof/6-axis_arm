@@ -1,4 +1,4 @@
-﻿# AGENTS.md
+# AGENTS.md
 
 ## Project
 
@@ -89,6 +89,7 @@ Gripper, scene separation, D435i, and VL checks:
 .venv\Scripts\python src\sim\verify_multi_object_scene.py
 .venv\Scripts\python src\sim\verify_language_goal.py
 .venv\Scripts\python src\sim\verify_multi_object_vl_pick_place.py
+.venv\Scripts\python src\sim\verify_collect_cylinders_to_tray.py
 .venv\Scripts\python src\sim\verify_d435i_camera.py
 .venv\Scripts\python src\sim\verify_vl_region.py
 ```

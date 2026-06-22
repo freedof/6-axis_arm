@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from pathlib import Path
 import sys
@@ -10,7 +10,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from src.sim.d435i_model import DEFAULT_D435I_MULTI_OBJECT_MODEL, write_d435i_multi_object_scene_model
-from src.sim.gripper_pick_scene import DEFAULT_MULTI_OBJECT_MODEL, DEFAULT_MULTI_OBJECT_SPECS, object_specs_to_dicts, write_multi_object_scene_model
+from src.sim.gripper_pick_scene import DEFAULT_MULTI_OBJECT_MODEL, DEFAULT_MULTI_OBJECT_SPECS, object_specs_to_dicts, tray_metadata, write_multi_object_scene_model
 from src.sim.render_d435i_preview import render_preview
 
 
@@ -25,6 +25,8 @@ def main() -> None:
     d435i_model = mujoco.MjModel.from_xml_path(str(d435i_path))
     _assert_objects(scene_model)
     _assert_objects(d435i_model)
+    _assert_tray(scene_model)
+    _assert_tray(d435i_model)
     _assert_camera(d435i_model, "d435i_depth")
     _assert_camera(d435i_model, "d435i_rgb")
 
@@ -37,6 +39,7 @@ def main() -> None:
     print("scene:", scene_path)
     print("d435i_scene:", d435i_path)
     print("objects:", object_specs_to_dicts(DEFAULT_MULTI_OBJECT_SPECS))
+    print("tray:", tray_metadata())
     print("rgb:", preview["rgb_path"])
     print("raw_depth_vis:", preview["raw_depth_vis_path"])
     print("raw_depth_stats:", preview["raw_depth_stats"])
@@ -52,6 +55,22 @@ def _assert_objects(model: mujoco.MjModel) -> None:
             raise RuntimeError(f"Missing object geom: {spec.name}_geom")
         if int(model.geom_contype[geom_id]) == 0 or int(model.geom_conaffinity[geom_id]) == 0:
             raise RuntimeError(f"Object geom should be collision-enabled: {spec.name}_geom")
+
+
+def _assert_tray(model: mujoco.MjModel) -> None:
+    required_geoms = (
+        "tabletop_tray_floor",
+        "tabletop_tray_wall_front",
+        "tabletop_tray_wall_back",
+        "tabletop_tray_wall_left",
+        "tabletop_tray_wall_right",
+    )
+    for name in required_geoms:
+        geom_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, name)
+        if geom_id < 0:
+            raise RuntimeError(f"Missing tray geom: {name}")
+        if int(model.geom_contype[geom_id]) == 0 or int(model.geom_conaffinity[geom_id]) == 0:
+            raise RuntimeError(f"Tray geom should be collision-enabled: {name}")
 
 
 def _assert_camera(model: mujoco.MjModel, name: str) -> None:

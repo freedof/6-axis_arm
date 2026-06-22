@@ -1,4 +1,4 @@
-﻿# 验证指南
+# 验证指南
 
 本文档集中记录项目验证命令、自动预检范围和用户验收规则。`AGENTS.md` 只保留入口索引；详细验证步骤放在这里。
 
@@ -133,6 +133,7 @@ docs/rrt_connect_test_report.md
 .venv\Scripts\python src\sim\verify_multi_object_scene.py
 .venv\Scripts\python src\sim\verify_language_goal.py
 .venv\Scripts\python src\sim\verify_multi_object_vl_pick_place.py
+.venv\Scripts\python src\sim\verify_collect_cylinders_to_tray.py
 ```
 
 渲染抓取 GIF：
@@ -147,11 +148,11 @@ docs/rrt_connect_test_report.md
 outputs/gripper_pick/simplified_gripper_pick_cube.gif
 ```
 
-抓取场景应与传统红/蓝圆球场景分离，不应包含 legacy roundtrip target spheres。多物体场景会额外生成不同颜色的 box/cylinder，并输出一组 D435i RGB/depth 预览，用于后续语言指令目标选择验证。
+抓取场景应与传统红/蓝圆球场景分离，不应包含 legacy roundtrip target spheres。多物体场景会额外生成不同颜色的 box/cylinder 和桌面托盘，并输出一组 D435i RGB/depth 预览，用于后续语言指令目标选择与放置验证。
 
 语言目标解析测试覆盖中文/英文指令中的动作、颜色、形状、桌面区域和多候选歧义输出，确保后续 VL 只消费结构化目标约束。
 
-多物体 VL pick-and-place 测试默认执行“把蓝色方块放到桌面右侧”：语言解析得到 blue cube 与 right table region，多视角 D435i/VL/depth 融合得到目标 3D 点，随后用 RRT-Connect 生成抓取、搬运、放置轨迹并渲染 GIF。
+多物体 VL pick-and-place 测试默认执行“把蓝色方块放到托盘中”：语言解析得到 blue cube 与 tray destination，多视角 D435i/VL/depth 融合得到目标 3D 点，随后用 RRT-Connect 生成抓取、搬运、放置轨迹并渲染 GIF。集合指令测试执行“把所有圆柱体夹到托盘中”，会拆成绿色圆柱体和黄色圆柱体两个可验收子任务，并分别生成 GIF。
 
 ## D435i RGB-D 相机
 

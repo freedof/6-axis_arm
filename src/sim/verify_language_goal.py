@@ -58,6 +58,18 @@ def main() -> None:
             "matched_count": 3,
             "destination": None,
         },
+        {
+            "instruction": "把所有圆柱体夹到托盘中",
+            "status": "ok",
+            "action": "pick_and_place",
+            "object_name": None,
+            "color": None,
+            "shape": "cylinder",
+            "matched_count": 2,
+            "quantifier": "all",
+            "destination_region": "tray",
+            "destination_type": "tray",
+        },
     ]
 
     for case in cases:
@@ -96,6 +108,8 @@ def _assert_case(result: dict, case: dict) -> None:
 
     if "matched_count" in case and len(result["matched_objects"]) != case["matched_count"]:
         raise RuntimeError(f"Unexpected matched count for {case['instruction']}: {result}")
+    if "quantifier" in case and result["target"].get("quantifier") != case["quantifier"]:
+        raise RuntimeError(f"Unexpected quantifier for {case['instruction']}: {result}")
     if case.get("destination") is None and "destination_region" not in case and result["destination"] is not None:
         raise RuntimeError(f"Unexpected destination for {case['instruction']}: {result}")
     if "destination_region" in case:
@@ -103,6 +117,8 @@ def _assert_case(result: dict, case: dict) -> None:
             raise RuntimeError(f"Unexpected destination region for {case['instruction']}: {result}")
         if len(result["destination"]["world_xy_m"]) != 2:
             raise RuntimeError(f"Destination should expose world_xy_m for {case['instruction']}: {result}")
+        if "destination_type" in case and result["destination"].get("type") != case["destination_type"]:
+            raise RuntimeError(f"Unexpected destination type for {case['instruction']}: {result}")
     if not result["vl_prompt"]:
         raise RuntimeError(f"Expected a VL prompt for {case['instruction']}: {result}")
 

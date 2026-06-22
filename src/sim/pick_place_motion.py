@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
@@ -113,6 +113,7 @@ def plan_pick_place_trajectory(
     place_xy: np.ndarray | list[float] | tuple[float, float],
     *,
     object_half_height: float,
+    placement_surface_z: float = TABLE_TOP_Z,
     source_model: Path = DEFAULT_MULTI_OBJECT_MODEL,
     shortcut: bool = True,
 ) -> PlannedPickPlaceTrajectory:
@@ -125,7 +126,7 @@ def plan_pick_place_trajectory(
 
     half_height = float(object_half_height)
     object_center = target - np.array([0.0, 0.0, half_height], dtype=float)
-    place_center = np.array([place_xy_array[0], place_xy_array[1], TABLE_TOP_Z + half_height], dtype=float)
+    place_center = np.array([place_xy_array[0], place_xy_array[1], float(placement_surface_z) + half_height], dtype=float)
     poses = solve_pick_place_poses(object_center, place_center)
 
     robot = dobot_cr5_simplified()
@@ -277,7 +278,7 @@ def simulate_pick_place(
     lifted = bool(max_object_z > initial_object_pos[2] + 0.050)
     place_distance_xy = float(np.linalg.norm(final_object_pos[:2] - planned_trajectory.place_center[:2]))
     moved_distance_xy = float(np.linalg.norm(final_object_pos[:2] - initial_object_pos[:2]))
-    final_z_expected = TABLE_TOP_Z + planned_trajectory.object_half_height
+    final_z_expected = planned_trajectory.place_center[2]
     placed = bool(lifted and moved_distance_xy > 0.035 and place_distance_xy < 0.075 and abs(float(final_object_pos[2]) - final_z_expected) < 0.045)
     return PickPlaceSimulationResult(
         object_name=object_name,
@@ -351,5 +352,3 @@ def _body_id(model: mujoco.MjModel, name: str) -> int:
     if body_id < 0:
         raise RuntimeError(f"Missing body: {name}")
     return body_id
-
-
