@@ -12,7 +12,7 @@ from src.mcp_robot import skills
 
 
 DEFAULT_OUTPUT_DIR = ROOT / "outputs" / "pick_place" / "collect_cylinders_to_tray"
-DEFAULT_GIF_DIR = DEFAULT_OUTPUT_DIR / "gifs"
+DEFAULT_GIF = DEFAULT_OUTPUT_DIR / "all_cylinders_continuous.gif"
 
 
 def main() -> None:
@@ -24,7 +24,7 @@ def main() -> None:
     parser.add_argument("--model", default=None)
     parser.add_argument("--config-path", type=Path, default=None)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
-    parser.add_argument("--gif-dir", type=Path, default=DEFAULT_GIF_DIR)
+    parser.add_argument("--gif", type=Path, default=DEFAULT_GIF)
     parser.add_argument("--poses", nargs="+", default=list(skills.MULTI_VIEW_DEFAULT_POSES))
     parser.add_argument("--max-parallel-vl", type=int, default=4)
     parser.add_argument("--depth-variant", default="raw", choices=list(skills.DEPTH_VARIANTS))
@@ -51,7 +51,7 @@ def main() -> None:
         max_parallel_vl=args.max_parallel_vl,
         depth_variant=args.depth_variant,
         render_gif=not args.no_gif,
-        output_path=_resolve_path(args.gif_dir),
+        output_path=_resolve_path(args.gif),
         frames=args.frames,
         fps=args.fps,
         width=args.width,
@@ -68,7 +68,8 @@ def main() -> None:
         print(f"subtask_{index}_status:", subtask.get("status"))
         print(f"subtask_{index}_place_center_m:", subtask.get("place_center_m"))
         print(f"subtask_{index}_metrics:", subtask.get("metrics"))
-        print(f"subtask_{index}_gif:", subtask.get("gif"))
+    print("sequence:", result.get("sequence"))
+    print("gif:", result.get("gif"))
     print("gif_paths:", result.get("gif_paths"))
     print("status:", result["status"])
     if result["status"] != "automatic_precheck_passed":

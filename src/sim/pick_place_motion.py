@@ -108,6 +108,23 @@ class PickPlaceSimulationResult:
     placed: bool
 
 
+@dataclass(frozen=True)
+class PickPlaceSequenceItem:
+    object_name: str
+    planned_trajectory: PlannedPickPlaceTrajectory
+
+
+@dataclass(frozen=True)
+class PickPlaceSequenceResult:
+    item_results: tuple[PickPlaceSimulationResult, ...]
+    final_gripper_qpos: np.ndarray
+    total_frames: int
+
+    @property
+    def placed(self) -> bool:
+        return all(result.placed for result in self.item_results)
+
+
 def plan_pick_place_trajectory(
     target_surface_world: np.ndarray,
     place_xy: np.ndarray | list[float] | tuple[float, float],
@@ -275,23 +292,94 @@ def simulate_pick_place(
 
     final_object_pos = data.xpos[object_body_id].copy()
     final_gripper_qpos = data.qpos[ROBOT_DOF : ROBOT_DOF + GRIPPER_DOF].copy()
-    lifted = bool(max_object_z > initial_object_pos[2] + 0.050)
-    place_distance_xy = float(np.linalg.norm(final_object_pos[:2] - planned_trajectory.place_center[:2]))
-    moved_distance_xy = float(np.linalg.norm(final_object_pos[:2] - initial_object_pos[:2]))
-    final_z_expected = planned_trajectory.place_center[2]
-    placed = bool(lifted and moved_distance_xy > 0.035 and place_distance_xy < 0.075 and abs(float(final_object_pos[2]) - final_z_expected) < 0.045)
-    return PickPlaceSimulationResult(
-        object_name=object_name,
-        initial_object_pos=initial_object_pos,
-        final_object_pos=final_object_pos,
-        max_object_z=max_object_z,
-        place_center=planned_trajectory.place_center.copy(),
-        final_gripper_qpos=final_gripper_qpos,
-        lifted=lifted,
-        placed=placed,
+    return _make_pick_place_result(
+        object_name,
+        initial_object_pos,
+        final_object_pos,
+        max_object_z,
+        planned_trajectory,
+        final_gripper_qpos,
     )
 
 
+def simulate_pick_place_sequence(
+    model_path: Path,
+    items: tuple[PickPlaceSequenceItem, ...] | list[PickPlaceSequenceItem],
+    *,
+    fps: int,
+    frames: int = 0,
+    bridge_seconds: float = 1.2,
+) -> PickPlaceSequenceResult:
+    sequence = tuple(items)
+    if not sequence:
+        raise ValueError("items must contain at least one pick-and-place task.")
+
+    model = mujoco.MjModel.from_xml_path(str(model_path))
+    data = mujoco.MjData(model)
+    data.qpos[:] = model.qpos0.copy()
+    data.qpos[:ROBOT_DOF] = sequence[0].planned_trajectory.poses.q_ready
+    data.qpos[ROBOT_DOF : ROBOT_DOF + GRIPPER_DOF] = GRIPPER_OPEN_QPOS
+    data.ctrl[:] = 0.0
+    data.ctrl[:ROBOT_DOF] = sequence[0].planned_trajectory.poses.q_ready
+    data.ctrl[ROBOT_DOF : ROBOT_DOF + GRIPPER_DOF] = GRIPPER_OPEN_QPOS
+    mujoco.mj_forward(model, data)
+
+    steps_per_frame = max(1, int(round(1.0 / (fps * model.opt.timestep))))
+    total_required = pick_place_sequence_required_frames(sequence, frames=frames, fps=fps, bridge_seconds=bridge_seconds)
+    item_results: list[PickPlaceSimulationResult] = []
+    frame_count = 0
+
+    for index, item in enumerate(sequence):
+        if index > 0:
+            frame_count += _run_bridge(
+                model,
+                data,
+                q_start=data.qpos[:ROBOT_DOF].copy(),
+                q_end=item.planned_trajectory.poses.q_ready,
+                fps=fps,
+                steps_per_frame=steps_per_frame,
+                duration_s=bridge_seconds,
+            )
+
+        body_id = _body_id(model, item.object_name)
+        initial_object_pos = data.xpos[body_id].copy()
+        max_object_z = float(initial_object_pos[2])
+        task_frames = pick_place_required_frames(item.planned_trajectory, frames=0, fps=fps)
+        for frame_index in range(task_frames):
+            for step_index in range(steps_per_frame):
+                sim_time = (frame_index * steps_per_frame + step_index) * model.opt.timestep
+                q_des, gripper_des = pick_place_command_at_time(item.planned_trajectory, sim_time)
+                data.ctrl[:ROBOT_DOF] = q_des
+                data.ctrl[ROBOT_DOF : ROBOT_DOF + GRIPPER_DOF] = gripper_des
+                mujoco.mj_step(model, data)
+                max_object_z = max(max_object_z, float(data.xpos[body_id, 2]))
+            frame_count += 1
+
+        final_object_pos = data.xpos[body_id].copy()
+        final_gripper_qpos = data.qpos[ROBOT_DOF : ROBOT_DOF + GRIPPER_DOF].copy()
+        item_results.append(
+            _make_pick_place_result(
+                item.object_name,
+                initial_object_pos,
+                final_object_pos,
+                max_object_z,
+                item.planned_trajectory,
+                final_gripper_qpos,
+            )
+        )
+
+    while frame_count < total_required:
+        data.ctrl[:ROBOT_DOF] = sequence[-1].planned_trajectory.poses.q_retreat
+        data.ctrl[ROBOT_DOF : ROBOT_DOF + GRIPPER_DOF] = GRIPPER_OPEN_QPOS
+        for _ in range(steps_per_frame):
+            mujoco.mj_step(model, data)
+        frame_count += 1
+
+    return PickPlaceSequenceResult(
+        item_results=tuple(item_results),
+        final_gripper_qpos=data.qpos[ROBOT_DOF : ROBOT_DOF + GRIPPER_DOF].copy(),
+        total_frames=frame_count,
+    )
 def pick_place_command_at_time(planned: PlannedPickPlaceTrajectory, t: float) -> tuple[np.ndarray, float]:
     if t < PLANNED_PICK_READY_DWELL_SECONDS:
         return planned.poses.q_ready, GRIPPER_OPEN_QPOS
@@ -347,6 +435,72 @@ def pick_place_required_frames(planned: PlannedPickPlaceTrajectory, *, frames: i
     return max(int(frames), required)
 
 
+def pick_place_sequence_required_frames(
+    items: tuple[PickPlaceSequenceItem, ...] | list[PickPlaceSequenceItem],
+    *,
+    frames: int,
+    fps: int,
+    bridge_seconds: float = 1.2,
+) -> int:
+    sequence = tuple(items)
+    if not sequence:
+        return int(frames)
+    required = sum(pick_place_required_frames(item.planned_trajectory, frames=0, fps=fps) for item in sequence)
+    required += int(np.ceil(max(0, len(sequence) - 1) * bridge_seconds * fps))
+    return max(int(frames), int(required))
+
+
+def _run_bridge(
+    model: mujoco.MjModel,
+    data: mujoco.MjData,
+    *,
+    q_start: np.ndarray,
+    q_end: np.ndarray,
+    fps: int,
+    steps_per_frame: int,
+    duration_s: float,
+) -> int:
+    bridge_frames = int(np.ceil(max(0.0, duration_s) * fps))
+    if bridge_frames <= 0:
+        return 0
+    total_steps = bridge_frames * steps_per_frame
+    for step_index in range(total_steps):
+        alpha = _smoothstep((step_index + 1) / total_steps)
+        q_des = (1.0 - alpha) * q_start + alpha * q_end
+        data.ctrl[:ROBOT_DOF] = q_des
+        data.ctrl[ROBOT_DOF : ROBOT_DOF + GRIPPER_DOF] = GRIPPER_OPEN_QPOS
+        mujoco.mj_step(model, data)
+    return bridge_frames
+
+
+def _make_pick_place_result(
+    object_name: str,
+    initial_object_pos: np.ndarray,
+    final_object_pos: np.ndarray,
+    max_object_z: float,
+    planned_trajectory: PlannedPickPlaceTrajectory,
+    final_gripper_qpos: np.ndarray,
+) -> PickPlaceSimulationResult:
+    lifted = bool(max_object_z > initial_object_pos[2] + 0.050)
+    place_distance_xy = float(np.linalg.norm(final_object_pos[:2] - planned_trajectory.place_center[:2]))
+    moved_distance_xy = float(np.linalg.norm(final_object_pos[:2] - initial_object_pos[:2]))
+    final_z_expected = planned_trajectory.place_center[2]
+    placed = bool(
+        lifted
+        and moved_distance_xy > 0.035
+        and place_distance_xy < 0.075
+        and abs(float(final_object_pos[2]) - final_z_expected) < 0.045
+    )
+    return PickPlaceSimulationResult(
+        object_name=object_name,
+        initial_object_pos=initial_object_pos.copy(),
+        final_object_pos=final_object_pos.copy(),
+        max_object_z=float(max_object_z),
+        place_center=planned_trajectory.place_center.copy(),
+        final_gripper_qpos=final_gripper_qpos.copy(),
+        lifted=lifted,
+        placed=placed,
+    )
 def _body_id(model: mujoco.MjModel, name: str) -> int:
     body_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, name)
     if body_id < 0:

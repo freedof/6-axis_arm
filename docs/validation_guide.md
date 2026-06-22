@@ -152,7 +152,7 @@ outputs/gripper_pick/simplified_gripper_pick_cube.gif
 
 语言目标解析测试覆盖中文/英文指令中的动作、颜色、形状、桌面区域和多候选歧义输出，确保后续 VL 只消费结构化目标约束。
 
-多物体 VL pick-and-place 测试默认执行“把蓝色方块放到托盘中”：语言解析得到 blue cube 与 tray destination，多视角 D435i/VL/depth 融合得到目标 3D 点，随后用 RRT-Connect 生成抓取、搬运、放置轨迹并渲染 GIF。集合指令测试执行“把所有圆柱体夹到托盘中”，会拆成绿色圆柱体和黄色圆柱体两个可验收子任务，并分别生成 GIF。
+多物体 VL pick-and-place 测试默认执行“把蓝色方块放到托盘中”：语言解析得到 blue cube 与 tray destination，多视角 D435i/VL/depth 融合得到目标 3D 点，随后用 RRT-Connect 生成抓取、搬运、放置轨迹并渲染 GIF。集合指令测试执行“把所有圆柱体夹到托盘中”，会在同一个 MuJoCo 仿真状态中依次夹取绿色圆柱体和黄色圆柱体，并生成一个连续 GIF。
 
 ## D435i RGB-D 相机
 

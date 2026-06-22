@@ -152,7 +152,7 @@ outputs/pick_place/multi_object_vl_pick_place/blue_cube_tray_pick_place.gif
 把所有圆柱体夹到托盘中
 ```
 
-当前集合模式会将指令拆成多个单目标子任务，并为每个子任务生成一个 GIF，例如：
+当前集合模式会将指令拆成多个单目标计划，但会在同一个 MuJoCo 仿真状态中连续执行，并生成一个连续 GIF，例如：
 
 ```text
 outputs/pick_place/collect_cylinders_to_tray/gifs/01_green_cylinder.gif

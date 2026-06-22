@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import argparse
 from pathlib import Path
@@ -15,7 +15,7 @@ if str(ROOT) not in sys.path:
 from src.sim.gripper_model import GRIPPER_OPEN_QPOS
 from src.sim.gripper_pick_motion import GRIPPER_DOF, ROBOT_DOF
 from src.sim.gripper_pick_scene import DEFAULT_MULTI_OBJECT_MODEL, write_multi_object_scene_model
-from src.sim.pick_place_motion import PlannedPickPlaceTrajectory, pick_place_command_at_time
+from src.sim.pick_place_motion import PlannedPickPlaceTrajectory, PickPlaceSequenceItem, pick_place_command_at_time, pick_place_required_frames, pick_place_sequence_required_frames
 
 
 DEFAULT_OUTPUT = ROOT / "outputs" / "pick_place" / "multi_object_pick_place.gif"
@@ -74,6 +74,102 @@ def render_pick_place_gif(
         images.append(Image.fromarray(renderer.render()))
 
     renderer.close()
+    _save_gif(images, output_path, fps)
+    print(f"gif: {output_path}")
+
+
+def render_pick_place_sequence_gif(
+    model_path: Path,
+    output_path: Path,
+    *,
+    items: tuple[PickPlaceSequenceItem, ...] | list[PickPlaceSequenceItem],
+    width: int = 960,
+    height: int = 720,
+    frames: int = 0,
+    fps: int = 20,
+    show_sites: bool = False,
+    bridge_seconds: float = 1.2,
+) -> None:
+    sequence = tuple(items)
+    if not sequence:
+        raise ValueError("items must contain at least one pick-and-place task.")
+
+    model = mujoco.MjModel.from_xml_path(str(model_path))
+    data = mujoco.MjData(model)
+    renderer = mujoco.Renderer(model, height=height, width=width)
+    camera = configure_camera()
+
+    data.qpos[:] = model.qpos0.copy()
+    data.qpos[:ROBOT_DOF] = sequence[0].planned_trajectory.poses.q_ready
+    data.qpos[ROBOT_DOF : ROBOT_DOF + GRIPPER_DOF] = GRIPPER_OPEN_QPOS
+    data.ctrl[:] = 0.0
+    data.ctrl[:ROBOT_DOF] = sequence[0].planned_trajectory.poses.q_ready
+    data.ctrl[ROBOT_DOF : ROBOT_DOF + GRIPPER_DOF] = GRIPPER_OPEN_QPOS
+    mujoco.mj_forward(model, data)
+
+    images: list[Image.Image] = []
+    steps_per_frame = max(1, int(round(1.0 / (fps * model.opt.timestep))))
+    scene_option = mujoco.MjvOption()
+    mujoco.mjv_defaultOption(scene_option)
+    if not show_sites:
+        scene_option.sitegroup[:] = 0
+
+    total_frames = pick_place_sequence_required_frames(sequence, frames=frames, fps=fps, bridge_seconds=bridge_seconds)
+    frame_count = 0
+    for index, item in enumerate(sequence):
+        if index > 0:
+            bridge_frames = int(np.ceil(max(0.0, bridge_seconds) * fps))
+            q_start = data.qpos[:ROBOT_DOF].copy()
+            q_end = item.planned_trajectory.poses.q_ready
+            total_bridge_steps = max(1, bridge_frames * steps_per_frame)
+            for frame_index in range(bridge_frames):
+                for step_index in range(steps_per_frame):
+                    step = frame_index * steps_per_frame + step_index + 1
+                    alpha = _smoothstep(step / total_bridge_steps)
+                    q_des = (1.0 - alpha) * q_start + alpha * q_end
+                    data.ctrl[:ROBOT_DOF] = q_des
+                    data.ctrl[ROBOT_DOF : ROBOT_DOF + GRIPPER_DOF] = GRIPPER_OPEN_QPOS
+                    mujoco.mj_step(model, data)
+                _append_frame(renderer, data, camera, scene_option, images)
+                frame_count += 1
+
+        task_frames = pick_place_required_frames(item.planned_trajectory, frames=0, fps=fps)
+        for frame_index in range(task_frames):
+            for step_index in range(steps_per_frame):
+                sim_time = (frame_index * steps_per_frame + step_index) * model.opt.timestep
+                q_des, gripper_des = pick_place_command_at_time(item.planned_trajectory, sim_time)
+                data.ctrl[:ROBOT_DOF] = q_des
+                data.ctrl[ROBOT_DOF : ROBOT_DOF + GRIPPER_DOF] = gripper_des
+                mujoco.mj_step(model, data)
+            _append_frame(renderer, data, camera, scene_option, images)
+            frame_count += 1
+
+    while frame_count < total_frames:
+        data.ctrl[:ROBOT_DOF] = sequence[-1].planned_trajectory.poses.q_retreat
+        data.ctrl[ROBOT_DOF : ROBOT_DOF + GRIPPER_DOF] = GRIPPER_OPEN_QPOS
+        for _ in range(steps_per_frame):
+            mujoco.mj_step(model, data)
+        _append_frame(renderer, data, camera, scene_option, images)
+        frame_count += 1
+
+    renderer.close()
+    _save_gif(images, output_path, fps)
+    print(f"gif: {output_path}")
+
+
+def _smoothstep(value: float) -> float:
+    x = float(np.clip(value, 0.0, 1.0))
+    return x * x * (3.0 - 2.0 * x)
+
+
+def _append_frame(renderer: mujoco.Renderer, data: mujoco.MjData, camera: mujoco.MjvCamera, scene_option: mujoco.MjvOption, images: list[Image.Image]) -> None:
+    renderer.update_scene(data, camera=camera, scene_option=scene_option)
+    images.append(Image.fromarray(renderer.render()))
+
+
+def _save_gif(images: list[Image.Image], output_path: Path, fps: int) -> None:
+    if not images:
+        raise RuntimeError("No frames rendered.")
     output_path.parent.mkdir(parents=True, exist_ok=True)
     images[0].save(
         output_path,
@@ -83,9 +179,6 @@ def render_pick_place_gif(
         loop=0,
         optimize=False,
     )
-    print(f"gif: {output_path}")
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description="Render a planned multi-object pick-and-place GIF.")
     parser.add_argument("--model-output", type=Path, default=DEFAULT_MULTI_OBJECT_MODEL)
