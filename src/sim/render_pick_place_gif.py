@@ -88,7 +88,7 @@ def render_pick_place_sequence_gif(
     frames: int = 0,
     fps: int = 20,
     show_sites: bool = False,
-    bridge_seconds: float = 1.2,
+    bridge_seconds: float = 2.4,
 ) -> None:
     sequence = tuple(items)
     if not sequence:

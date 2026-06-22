@@ -308,7 +308,7 @@ def simulate_pick_place_sequence(
     *,
     fps: int,
     frames: int = 0,
-    bridge_seconds: float = 1.2,
+    bridge_seconds: float = 2.4,
 ) -> PickPlaceSequenceResult:
     sequence = tuple(items)
     if not sequence:
@@ -440,7 +440,7 @@ def pick_place_sequence_required_frames(
     *,
     frames: int,
     fps: int,
-    bridge_seconds: float = 1.2,
+    bridge_seconds: float = 2.4,
 ) -> int:
     sequence = tuple(items)
     if not sequence:

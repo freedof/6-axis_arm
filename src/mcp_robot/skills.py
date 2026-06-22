@@ -1003,7 +1003,7 @@ def _language_collection_pick_and_place(
         "subtasks": subtasks,
         "sequence": {
             "continuous_simulation": True,
-            "bridge_seconds": 1.2,
+            "bridge_seconds": 2.4,
             "frames": int(result.total_frames),
             "fps": fps,
             "playback_duration_s": round(float(result.total_frames) / float(fps), 3),
