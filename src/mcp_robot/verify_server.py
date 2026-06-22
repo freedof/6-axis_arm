@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 from pathlib import Path
@@ -40,6 +40,8 @@ def main() -> None:
             "plan_pick_from_target_3d",
             "vl_pick_cube",
             "multi_view_vl_locate_object_3d",
+            "multi_object_vl_locate",
+            "language_multi_view_pick_and_place",
             "multi_view_vl_pick_cube",
         }
         missing = sorted(required - tool_names)
@@ -229,3 +231,5 @@ def _read(process: subprocess.Popen[str]) -> dict[str, Any]:
 
 if __name__ == "__main__":
     main()
+
+

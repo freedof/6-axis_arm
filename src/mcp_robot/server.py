@@ -54,6 +54,8 @@ class RobotMcpServer:
             "plan_pick_from_target_3d": self._plan_pick_from_target_3d,
             "vl_pick_cube": self._vl_pick_cube,
             "multi_view_vl_locate_object_3d": self._multi_view_vl_locate_object_3d,
+            "multi_object_vl_locate": self._multi_object_vl_locate,
+            "language_multi_view_pick_and_place": self._language_multi_view_pick_and_place,
             "multi_view_vl_pick_cube": self._multi_view_vl_pick_cube,
         }
 
@@ -176,6 +178,7 @@ class RobotMcpServer:
             height=int(args.get("height", 240)),
             seed=int(args.get("seed", 7)),
             pose=str(args.get("pose", "scan")),
+            scene_id=str(args.get("scene_id", "gripper_pick_cube_d435i")),
         )
 
     def _estimate_region_3d(self, args: dict[str, Any]) -> dict[str, Any]:
@@ -199,6 +202,7 @@ class RobotMcpServer:
             seed=int(args.get("seed", 7)),
             pose=str(args.get("pose", "scan")),
             depth_variant=str(args.get("depth_variant", "raw")),
+            scene_id=str(args.get("scene_id", "gripper_pick_cube_d435i")),
         )
 
     def _pick_cube(self, args: dict[str, Any]) -> dict[str, Any]:
@@ -261,8 +265,49 @@ class RobotMcpServer:
             max_parallel_vl=int(args.get("max_parallel_vl", 4)),
             min_accepted_views=int(args.get("min_accepted_views", 1)),
             depth_variant=str(args.get("depth_variant", "raw")),
+            scene_id=str(args.get("scene_id", "gripper_pick_cube_d435i")),
         )
 
+    def _multi_object_vl_locate(self, args: dict[str, Any]) -> dict[str, Any]:
+        return skills.multi_object_vl_locate(
+            str(args["instruction"]),
+            args.get("output_dir"),
+            provider=str(args.get("provider", "color_fixture")),
+            manual_regions=args.get("manual_regions"),
+            model=args.get("model"),
+            config_path=args.get("config_path"),
+            camera_width=int(args.get("camera_width", 424)),
+            camera_height=int(args.get("camera_height", 240)),
+            seed=int(args.get("seed", 7)),
+            poses=args.get("poses", skills.MULTI_VIEW_DEFAULT_POSES),
+            max_parallel_vl=int(args.get("max_parallel_vl", 4)),
+            min_accepted_views=int(args.get("min_accepted_views", 1)),
+            depth_variant=str(args.get("depth_variant", "raw")),
+        )
+
+    def _language_multi_view_pick_and_place(self, args: dict[str, Any]) -> dict[str, Any]:
+        return skills.language_multi_view_pick_and_place(
+            str(args["instruction"]),
+            args.get("output_dir"),
+            provider=str(args.get("provider", "color_fixture")),
+            manual_regions=args.get("manual_regions"),
+            model=args.get("model"),
+            config_path=args.get("config_path"),
+            camera_width=int(args.get("camera_width", 424)),
+            camera_height=int(args.get("camera_height", 240)),
+            seed=int(args.get("seed", 7)),
+            poses=args.get("poses", skills.MULTI_VIEW_DEFAULT_POSES),
+            max_parallel_vl=int(args.get("max_parallel_vl", 4)),
+            min_accepted_views=int(args.get("min_accepted_views", 1)),
+            render_gif=bool(args.get("render_gif", True)),
+            output_path=args.get("output_path"),
+            frames=int(args.get("frames", 0)),
+            fps=int(args.get("fps", 20)),
+            width=int(args.get("width", 960)),
+            height=int(args.get("height", 720)),
+            show_sites=bool(args.get("show_sites", False)),
+            depth_variant=str(args.get("depth_variant", "raw")),
+        )
     def _multi_view_vl_pick_cube(self, args: dict[str, Any]) -> dict[str, Any]:
         return skills.multi_view_vl_pick_cube(
             str(args.get("prompt", "pick the red block")),
@@ -452,6 +497,15 @@ class RobotMcpServer:
                 "inputSchema": _multi_view_vl_schema(include_render=False),
             },
             {
+                "name": "multi_object_vl_locate",
+                "description": "Parse a language instruction, capture multi-object D435i views, run VL calls in parallel, and return a fused 3D target for the selected object.",
+                "inputSchema": _language_multi_view_schema(include_render=False),
+            },
+            {
+                "name": "language_multi_view_pick_and_place",
+                "description": "Run language target parsing, multi-object multi-view VL/depth localization, RRT-Connect pick-and-place planning, simulation, and optional GIF rendering.",
+                "inputSchema": _language_multi_view_schema(include_render=True),
+            },            {
                 "name": "multi_view_vl_pick_cube",
                 "description": "Run multi-view VL/depth fusion, convert the fused target_3d into grasp poses, plan with RRT-Connect, simulate pick, and optionally render a GIF.",
                 "inputSchema": _multi_view_vl_schema(include_render=True),
@@ -555,6 +609,48 @@ def _vl_pick_schema() -> dict[str, Any]:
     )
 
 
+
+def _language_multi_view_schema(*, include_render: bool) -> dict[str, Any]:
+    properties = {
+        "instruction": {"type": "string"},
+        "provider": {
+            "type": "string",
+            "default": "color_fixture",
+            "enum": list(skills.VL_PROVIDERS),
+        },
+        "manual_regions": {
+            "type": "object",
+            "description": "Optional map from pose name to manual bbox/point region.",
+        },
+        "model": {"type": "string"},
+        "config_path": {"type": "string"},
+        "output_dir": {"type": "string"},
+        "scene_id": {"type": "string", "default": "gripper_pick_cube_d435i", "enum": ["gripper_pick_cube_d435i", "gripper_multi_object_d435i"]},
+        "camera_width": {"type": "integer", "default": 424, "minimum": 1},
+        "camera_height": {"type": "integer", "default": 240, "minimum": 1},
+        "seed": {"type": "integer", "default": 7},
+        "poses": {
+            "type": "array",
+            "items": {"type": "string", "enum": list(skills.POSE_CHOICES)},
+            "default": list(skills.MULTI_VIEW_DEFAULT_POSES),
+        },
+        "max_parallel_vl": {"type": "integer", "default": 4, "minimum": 1},
+        "min_accepted_views": {"type": "integer", "default": 1, "minimum": 1},
+        "depth_variant": {
+            "type": "string",
+            "default": "raw",
+            "enum": list(skills.DEPTH_VARIANTS),
+            "description": "Depth image used for 3D lifting: raw_depth or noisy_depth.",
+        },
+    }
+    if include_render:
+        properties = {
+            **properties,
+            **_render_schema(default_frames=0, minimum_frames=0)["properties"],
+            "render_gif": {"type": "boolean", "default": True},
+        }
+    return _object_schema(properties, required=["instruction"])
+
 def _multi_view_vl_schema(*, include_render: bool) -> dict[str, Any]:
     properties = {
         "prompt": {"type": "string", "default": "pick the red block"},
@@ -570,6 +666,7 @@ def _multi_view_vl_schema(*, include_render: bool) -> dict[str, Any]:
         "model": {"type": "string"},
         "config_path": {"type": "string"},
         "output_dir": {"type": "string"},
+        "scene_id": {"type": "string", "default": "gripper_pick_cube_d435i", "enum": ["gripper_pick_cube_d435i", "gripper_multi_object_d435i"]},
         "camera_width": {"type": "integer", "default": 424, "minimum": 1},
         "camera_height": {"type": "integer", "default": 240, "minimum": 1},
         "seed": {"type": "integer", "default": 7},
@@ -598,3 +695,8 @@ def _multi_view_vl_schema(*, include_render: bool) -> dict[str, Any]:
 
 if __name__ == "__main__":
     main()
+
+
+
+
+

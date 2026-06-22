@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import base64
 from dataclasses import dataclass
@@ -50,20 +50,21 @@ def locate_red_region_fixture(
     prompt: str,
     output_path: str | Path | None = None,
 ) -> dict[str, Any]:
-    """Deterministic stand-in for a VL model during local integration tests."""
+    """Deterministic stand-in for a VL model during local integration tests.
+
+    The original fixture only looked for the red cube. It now infers a requested
+    color from the prompt so multi-object tabletop tests can validate the full
+    engineering chain without depending on a remote VL model.
+    """
     rgb_path = Path(rgb_path)
     image = np.asarray(Image.open(rgb_path).convert("RGB"))
-    red = image[:, :, 0].astype(np.int16)
-    green = image[:, :, 1].astype(np.int16)
-    blue = image[:, :, 2].astype(np.int16)
+    color = _fixture_color_from_prompt(prompt)
+    mask = _fixture_color_mask(image, color)
+    bbox = _largest_mask_component_bbox(mask)
+    if bbox is None:
+        raise RuntimeError(f"Fixture VL provider could not find a {color} target in {rgb_path}")
 
-    mask = (red > 100) & (red > green * 1.35) & (red > blue * 1.35)
-    ys, xs = np.nonzero(mask)
-    if xs.size == 0:
-        raise RuntimeError(f"Fixture VL provider could not find a red target in {rgb_path}")
-
-    x1, x2 = int(xs.min()), int(xs.max()) + 1
-    y1, y2 = int(ys.min()), int(ys.max()) + 1
+    x1, y1, x2, y2 = bbox
     confidence = float(np.clip(mask.mean() * 18.0, 0.05, 0.99))
 
     overlay_path = None
@@ -73,12 +74,12 @@ def locate_red_region_fixture(
         overlay = Image.open(rgb_path).convert("RGB")
         draw = ImageDraw.Draw(overlay)
         draw.rectangle((x1, y1, x2, y2), outline=(255, 230, 30), width=3)
-        draw.text((x1, max(0, y1 - 14)), "VL region", fill=(255, 230, 30))
+        draw.text((x1, max(0, y1 - 14)), f"VL {color}", fill=(255, 230, 30))
         overlay.save(overlay_path)
 
     return {
         "type": "bbox",
-        "label": "red_object",
+        "label": f"{color}_object",
         "prompt": prompt,
         "provider": "color_fixture",
         "bbox_xyxy": [x1, y1, x2, y2],
@@ -86,6 +87,73 @@ def locate_red_region_fixture(
         "overlay_path": str(overlay_path) if overlay_path is not None else None,
     }
 
+
+def _fixture_color_from_prompt(prompt: str) -> str:
+    text = prompt.lower()
+    aliases = {
+        "red": ("red", "红", "红色"),
+        "blue": ("blue", "蓝", "蓝色"),
+        "green": ("green", "绿", "绿色"),
+        "yellow": ("yellow", "黄", "黄色"),
+        "purple": ("purple", "紫", "紫色"),
+    }
+    for color, words in aliases.items():
+        if any(word in text for word in words):
+            return color
+    return "red"
+
+
+
+def _largest_mask_component_bbox(mask: np.ndarray) -> tuple[int, int, int, int] | None:
+    ys, xs = np.nonzero(mask)
+    if xs.size == 0:
+        return None
+    height, width = mask.shape
+    visited = np.zeros_like(mask, dtype=bool)
+    best: tuple[int, int, int, int, int] | None = None
+    for start_y, start_x in zip(ys.tolist(), xs.tolist()):
+        if visited[start_y, start_x]:
+            continue
+        stack = [(start_y, start_x)]
+        visited[start_y, start_x] = True
+        count = 0
+        min_x = max_x = start_x
+        min_y = max_y = start_y
+        while stack:
+            y, x = stack.pop()
+            count += 1
+            min_x = min(min_x, x)
+            max_x = max(max_x, x)
+            min_y = min(min_y, y)
+            max_y = max(max_y, y)
+            for ny, nx in ((y - 1, x), (y + 1, x), (y, x - 1), (y, x + 1)):
+                if 0 <= ny < height and 0 <= nx < width and mask[ny, nx] and not visited[ny, nx]:
+                    visited[ny, nx] = True
+                    stack.append((ny, nx))
+        if count < 4:
+            continue
+        if best is None or count > best[0]:
+            best = (count, min_x, min_y, max_x + 1, max_y + 1)
+    if best is None:
+        return None
+    _, x1, y1, x2, y2 = best
+    return int(x1), int(y1), int(x2), int(y2)
+
+def _fixture_color_mask(image: np.ndarray, color: str) -> np.ndarray:
+    red = image[:, :, 0].astype(np.int16)
+    green = image[:, :, 1].astype(np.int16)
+    blue = image[:, :, 2].astype(np.int16)
+    if color == "red":
+        return (red > 100) & (red > green * 1.35) & (red > blue * 1.35)
+    if color == "blue":
+        return (blue > 90) & (blue > red * 1.25) & (blue > green * 1.10)
+    if color == "green":
+        return (green > 85) & (green > red * 1.25) & (green > blue * 1.15)
+    if color == "yellow":
+        return (red > 120) & (green > 95) & (blue < 120) & (np.abs(red - green) < 95)
+    if color == "purple":
+        return (red > 80) & (blue > 100) & (green < 125) & (blue > green * 1.10)
+    raise ValueError(f"Unsupported fixture color: {color}")
 
 def locate_manual_region(
     region: dict[str, Any],
@@ -733,3 +801,6 @@ def _chat_completions_endpoint(base_url: str) -> str:
 
 def _round_vector(values: np.ndarray) -> list[float]:
     return [round(float(value), 6) for value in values.tolist()]
+
+
+

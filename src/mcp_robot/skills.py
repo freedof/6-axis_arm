@@ -19,6 +19,7 @@ from src.perception.vl_region import region3d_to_dict
 from src.perception.language_goal import parse_language_goal as parse_language_goal_instruction
 from src.sim.gripper_model import DEFAULT_GRIPPER_MODEL, write_gripper_model
 from src.sim.gripper_pick_motion import plan_pick_trajectory_from_target_3d, simulate_pick
+from src.sim.pick_place_motion import pick_place_required_frames, pick_place_segments, plan_pick_place_trajectory, simulate_pick_place
 from src.sim.gripper_pick_scene import CUBE_HALF_SIZE, DEFAULT_MULTI_OBJECT_MODEL, DEFAULT_MULTI_OBJECT_SPECS, DEFAULT_PICK_MODEL, TABLE_TOP_Z, object_specs_from_config, object_specs_to_dicts, write_multi_object_scene_model, write_pick_scene_model
 from src.sim.d435i_model import DEFAULT_D435I_GRIPPER_MODEL, DEFAULT_D435I_MULTI_OBJECT_MODEL, DEFAULT_D435I_PICK_MODEL, write_d435i_multi_object_scene_model, write_d435i_pick_scene_model
 from src.sim.render_d435i_preview import DEFAULT_OUTPUT_DIR as DEFAULT_D435I_OUTPUT_DIR
@@ -26,6 +27,7 @@ from src.sim.render_d435i_preview import POSE_CHOICES
 from src.sim.render_d435i_preview import render_preview as render_d435i_camera_preview
 from src.sim.render_gripper_pick_gif import DEFAULT_OUTPUT as DEFAULT_PICK_GIF
 from src.sim.render_gripper_pick_gif import render_gif as render_pick_gif
+from src.sim.render_pick_place_gif import render_pick_place_gif
 from src.sim.verify_render_gifs import validate_gif
 
 
@@ -248,7 +250,7 @@ def generate_d435i_scene() -> dict[str, Any]:
     return {
         "status": "ok",
         "model_path": _relative(model_path),
-        "scene_id": "gripper_pick_cube_d435i",
+        "scene_id": scene_id,
         "camera_names": ["d435i_depth", "d435i_rgb"],
     }
 
@@ -304,11 +306,12 @@ def vl_locate_object_region(
     height: int = 240,
     seed: int = 7,
     pose: str = "scan",
+    scene_id: str = "gripper_pick_cube_d435i",
 ) -> dict[str, Any]:
     if provider not in VL_PROVIDERS:
         raise ValueError(f"Unknown VL provider: {provider}")
     output = _resolve_output_dir(output_dir, "vl_region")
-    observation = render_d435i_preview(output, width=width, height=height, seed=seed, pose=pose)
+    observation = render_d435i_preview(output, width=width, height=height, seed=seed, pose=pose, scene_id=scene_id)
     rgb_path = ROOT / observation["files"]["rgb"]
     overlay_path = output / "vl_region_overlay.png"
     if provider == "color_fixture":
@@ -457,6 +460,7 @@ def vl_locate_object_3d(
     seed: int = 7,
     pose: str = "scan",
     depth_variant: str = "raw",
+    scene_id: str = "gripper_pick_cube_d435i",
 ) -> dict[str, Any]:
     depth_file_key = _depth_file_key(depth_variant)
     located = vl_locate_object_region(
@@ -470,6 +474,7 @@ def vl_locate_object_3d(
         height=height,
         seed=seed,
         pose=pose,
+        scene_id=scene_id,
     )
     observation = located["observation"]
     estimate = estimate_region_3d(
@@ -480,7 +485,7 @@ def vl_locate_object_3d(
     )
     return {
         "status": "ok",
-        "scene_id": "gripper_pick_cube_d435i",
+        "scene_id": scene_id,
         "prompt": prompt,
         "provider": provider,
         "depth_variant": depth_variant,
@@ -511,6 +516,7 @@ def multi_view_vl_locate_object_3d(
     max_cluster_radius_m: float = 0.040,
     min_accepted_views: int = 1,
     depth_variant: str = "raw",
+    scene_id: str = "gripper_pick_cube_d435i",
 ) -> dict[str, Any]:
     if provider not in VL_PROVIDERS:
         raise ValueError(f"Unknown VL provider: {provider}")
@@ -530,6 +536,7 @@ def multi_view_vl_locate_object_3d(
             height=camera_height,
             seed=seed + index,
             pose=pose,
+            scene_id=scene_id,
         )
 
     candidates: list[dict[str, Any]] = []
@@ -579,7 +586,7 @@ def multi_view_vl_locate_object_3d(
     if not accepted:
         return {
             "status": "failed",
-            "scene_id": "gripper_pick_cube_d435i",
+            "scene_id": scene_id,
             "prompt": prompt,
             "provider": provider,
             "depth_variant": depth_variant,
@@ -594,7 +601,7 @@ def multi_view_vl_locate_object_3d(
     if len(accepted) < required_accepted:
         return {
             "status": "failed",
-            "scene_id": "gripper_pick_cube_d435i",
+            "scene_id": scene_id,
             "prompt": prompt,
             "provider": provider,
             "depth_variant": depth_variant,
@@ -619,7 +626,7 @@ def multi_view_vl_locate_object_3d(
         confidence = float(np.clip(1.0 - mean_distance / max(max_cluster_radius_m, 1e-6), 0.05, 1.0))
     return {
         "status": "ok",
-        "scene_id": "gripper_pick_cube_d435i",
+        "scene_id": scene_id,
         "prompt": prompt,
         "provider": provider,
         "depth_variant": depth_variant,
@@ -643,6 +650,188 @@ def multi_view_vl_locate_object_3d(
         },
     }
 
+
+
+def multi_object_vl_locate(
+    instruction: str,
+    output_dir: str | Path | None = None,
+    *,
+    provider: str = "color_fixture",
+    manual_regions: dict[str, dict[str, Any]] | None = None,
+    model: str | None = None,
+    config_path: str | Path | None = None,
+    camera_width: int = 424,
+    camera_height: int = 240,
+    seed: int = 7,
+    poses: list[str] | tuple[str, ...] = MULTI_VIEW_DEFAULT_POSES,
+    max_parallel_vl: int = 4,
+    min_accepted_views: int = 1,
+    depth_variant: str = "raw",
+) -> dict[str, Any]:
+    parsed = parse_language_goal(instruction)
+    if parsed["status"] != "ok":
+        return {
+            "status": "failed",
+            "scene_id": "gripper_multi_object_d435i",
+            "skill": "multi_object_vl_locate",
+            "language_goal": parsed,
+            "reason": "language goal must resolve exactly one target object before VL grounding",
+        }
+    target_object = _object_by_name(str(parsed["target"]["object_name"]))
+    object_half_height = _object_half_height_m(target_object)
+    located = multi_view_vl_locate_object_3d(
+        parsed["vl_prompt"],
+        output_dir,
+        provider=provider,
+        manual_regions=manual_regions,
+        model=model,
+        config_path=config_path,
+        camera_width=camera_width,
+        camera_height=camera_height,
+        seed=seed,
+        poses=poses,
+        max_parallel_vl=max_parallel_vl,
+        min_valid_pixels=25,
+        min_surface_z_m=TABLE_TOP_Z + object_half_height + 0.004,
+        max_surface_z_m=TABLE_TOP_Z + object_half_height * 2.0 + 0.060,
+        min_accepted_views=min_accepted_views,
+        depth_variant=depth_variant,
+        scene_id="gripper_multi_object_d435i",
+    )
+    return {
+        "status": located["status"],
+        "scene_id": "gripper_multi_object_d435i",
+        "skill": "multi_object_vl_locate",
+        "instruction": instruction,
+        "language_goal": parsed,
+        "target_object": target_object,
+        "object_half_height_m": round(object_half_height, 6),
+        "perception": located,
+    }
+
+
+def language_multi_view_pick_and_place(
+    instruction: str,
+    output_dir: str | Path | None = None,
+    *,
+    provider: str = "color_fixture",
+    manual_regions: dict[str, dict[str, Any]] | None = None,
+    model: str | None = None,
+    config_path: str | Path | None = None,
+    camera_width: int = 424,
+    camera_height: int = 240,
+    seed: int = 7,
+    poses: list[str] | tuple[str, ...] = MULTI_VIEW_DEFAULT_POSES,
+    max_parallel_vl: int = 4,
+    min_accepted_views: int = 1,
+    render_gif: bool = True,
+    output_path: str | Path | None = None,
+    frames: int = 0,
+    fps: int = 20,
+    width: int = 960,
+    height: int = 720,
+    show_sites: bool = False,
+    depth_variant: str = "raw",
+) -> dict[str, Any]:
+    located = multi_object_vl_locate(
+        instruction,
+        output_dir,
+        provider=provider,
+        manual_regions=manual_regions,
+        model=model,
+        config_path=config_path,
+        camera_width=camera_width,
+        camera_height=camera_height,
+        seed=seed,
+        poses=poses,
+        max_parallel_vl=max_parallel_vl,
+        min_accepted_views=min_accepted_views,
+        depth_variant=depth_variant,
+    )
+    parsed = located["language_goal"]
+    if located["status"] != "ok":
+        return {
+            "status": "failed",
+            "scene_id": "gripper_multi_object_d435i",
+            "skill": "language_multi_view_pick_and_place",
+            "language_goal": parsed,
+            "perception": located.get("perception"),
+            "reason": located.get("reason", "multi-object VL localization failed"),
+            "user_acceptance": "pending",
+        }
+    destination = parsed.get("destination")
+    if not destination or destination.get("world_xy_m") is None:
+        return {
+            "status": "failed",
+            "scene_id": "gripper_multi_object_d435i",
+            "skill": "language_multi_view_pick_and_place",
+            "language_goal": parsed,
+            "perception": located["perception"],
+            "reason": "pick-and-place requires a destination region in the instruction",
+            "user_acceptance": "pending",
+        }
+
+    target_surface_world = np.asarray(located["perception"]["fusion"]["fused_target_surface_world_m"], dtype=float)
+    target_object = located["target_object"]
+    object_half_height = float(located["object_half_height_m"])
+    model_path = write_multi_object_scene_model(DEFAULT_MULTI_OBJECT_MODEL)
+    planned = plan_pick_place_trajectory(
+        target_surface_world,
+        destination["world_xy_m"],
+        object_half_height=object_half_height,
+        source_model=model_path,
+    )
+    actual_frames = pick_place_required_frames(planned, frames=frames, fps=fps)
+    result = simulate_pick_place(
+        model_path,
+        planned,
+        object_name=str(target_object["name"]),
+        frames=actual_frames,
+        fps=fps,
+    )
+    status = "automatic_precheck_passed" if result.placed else "failed"
+    response: dict[str, Any] = {
+        "status": status,
+        "scene_id": "gripper_multi_object",
+        "skill": "language_multi_view_pick_and_place",
+        "instruction": instruction,
+        "language_goal": parsed,
+        "target_object": target_object,
+        "model_path": _relative(model_path),
+        "perception": located["perception"],
+        "target_surface_world_m": _round_vector(target_surface_world),
+        "place_center_m": _round_vector(planned.place_center),
+        "rrt_connect": {
+            "segments": [_planned_segment_summary(segment) for segment in pick_place_segments(planned)],
+            "playback_duration_s": round(float(planned.total_playback_duration), 3),
+        },
+        "metrics": _pick_place_metrics(result),
+        "render": {
+            "width": width,
+            "height": height,
+            "frames": actual_frames,
+            "fps": fps,
+            "show_sites": show_sites,
+        },
+        "user_acceptance": "pending",
+    }
+    if render_gif:
+        output = (ROOT / "outputs" / "pick_place" / "language_multi_view_pick_and_place.gif") if output_path is None else Path(output_path)
+        if not output.is_absolute():
+            output = ROOT / output
+        render_pick_place_gif(
+            model_path,
+            output,
+            planned_trajectory=planned,
+            width=width,
+            height=height,
+            frames=actual_frames,
+            fps=fps,
+            show_sites=show_sites,
+        )
+        validate_gif(output, expected_frames=actual_frames, expected_size=(width, height), expected_fps=fps)
+        response["gif"] = _relative(output)
+    return response
 
 def simulate_pick_cube(frames: int = 120, fps: int = 20) -> dict[str, Any]:
     model_path = write_pick_scene_model(DEFAULT_PICK_MODEL)
@@ -806,6 +995,7 @@ def vl_pick_cube(
     height: int = 720,
     show_sites: bool = False,
     depth_variant: str = "raw",
+    scene_id: str = "gripper_pick_cube_d435i",
 ) -> dict[str, Any]:
     located = vl_locate_object_3d(
         prompt,
@@ -894,6 +1084,7 @@ def multi_view_vl_pick_cube(
     height: int = 720,
     show_sites: bool = False,
     depth_variant: str = "raw",
+    scene_id: str = "gripper_pick_cube_d435i",
 ) -> dict[str, Any]:
     located = multi_view_vl_locate_object_3d(
         prompt,
@@ -913,7 +1104,7 @@ def multi_view_vl_pick_cube(
     if located["status"] != "ok":
         return {
             "status": "failed",
-            "scene_id": "gripper_pick_cube_d435i",
+            "scene_id": scene_id,
             "skill": "multi_view_vl_pick_cube",
             "perception": located,
             "user_acceptance": "pending",
@@ -963,6 +1154,34 @@ def multi_view_vl_pick_cube(
     return response
 
 
+
+def _object_by_name(name: str) -> dict[str, Any]:
+    for item in object_specs_to_dicts(DEFAULT_MULTI_OBJECT_SPECS):
+        if item["name"] == name:
+            return item
+    raise ValueError(f"Unknown multi-object scene object: {name}")
+
+
+def _object_half_height_m(item: dict[str, Any]) -> float:
+    if "half_size_m" in item:
+        return float(item["half_size_m"][2])
+    if "half_height_m" in item:
+        return float(item["half_height_m"])
+    raise ValueError(f"Object does not expose a half height: {item}")
+
+
+def _pick_place_metrics(result) -> dict[str, Any]:
+    return {
+        "object_name": result.object_name,
+        "initial_object_pos_m": _round_vector(result.initial_object_pos),
+        "final_object_pos_m": _round_vector(result.final_object_pos),
+        "max_object_z_m": round(float(result.max_object_z), 6),
+        "place_center_m": _round_vector(result.place_center),
+        "final_gripper_qpos_m": _round_vector(result.final_gripper_qpos),
+        "lifted": bool(result.lifted),
+        "placed": bool(result.placed),
+        "automatic_check": "target object is lifted, moved, and ends near the requested place center",
+    }
 def _pick_metrics(result) -> dict[str, Any]:
     return {
         "initial_cube_pos_m": _round_vector(result.initial_cube_pos),
@@ -1203,3 +1422,15 @@ def _resolve_output_dir(output_dir: str | Path | None, default_name: str) -> Pat
         output = ROOT / output
     output.mkdir(parents=True, exist_ok=True)
     return output
+
+
+
+
+
+
+
+
+
+
+
+

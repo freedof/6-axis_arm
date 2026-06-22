@@ -112,6 +112,38 @@ assets/dobot_cr5/mjcf/cr5_gripper_pick_scene.xml
 
 返回结果中，`status=ok` 表示目标唯一；`status=ambiguous` 表示需要用户或上层策略继续消歧；`status=no_match` 表示当前场景没有匹配物体。
 
+
+### multi_object_vl_locate
+
+先解析语言指令，再在多物体 D435i 场景中执行多视角 VL 定位和深度反投影，返回所选物体的融合 `target_3d`。
+
+典型 MCP 调用参数：
+
+```json
+{
+  "instruction": "夹取蓝色方块",
+  "provider": "color_fixture",
+  "poses": ["scan_high", "scan_front_high", "scan_left_high", "scan_right_high"]
+}
+```
+
+### language_multi_view_pick_and_place
+
+执行完整闭环：语言目标解析、多物体多视角 VL 识别、深度定位、RRT-Connect pick-and-place 规划、MuJoCo 动力学仿真和可选 GIF 渲染。
+
+默认验证指令：
+
+```text
+把蓝色方块放到桌面右侧
+```
+
+验证 GIF 示例：
+
+```text
+outputs/pick_place/multi_object_vl_pick_place/blue_cube_right_pick_place.gif
+```
+
+该工具返回 `automatic_precheck_passed` 仍只表示自动预检通过，最终是否接受需要用户查看 GIF 后确认。
 ### simulate_pick_cube
 
 只运行动力学抓取仿真，不渲染 GIF。
