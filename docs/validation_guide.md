@@ -1,4 +1,4 @@
-# 验证指南
+﻿# 验证指南
 
 本文档集中记录项目验证命令、自动预检范围和用户验收规则。`AGENTS.md` 只保留入口索引；详细验证步骤放在这里。
 
@@ -130,6 +130,7 @@ docs/rrt_connect_test_report.md
 .venv\Scripts\python src\sim\gripper_pick_scene.py
 .venv\Scripts\python src\sim\verify_gripper_pick.py
 .venv\Scripts\python src\sim\verify_scene_separation.py
+.venv\Scripts\python src\sim\verify_multi_object_scene.py
 ```
 
 渲染抓取 GIF：
@@ -144,7 +145,7 @@ docs/rrt_connect_test_report.md
 outputs/gripper_pick/simplified_gripper_pick_cube.gif
 ```
 
-抓取场景应与传统红/蓝圆球场景分离，不应包含 legacy roundtrip target spheres。
+抓取场景应与传统红/蓝圆球场景分离，不应包含 legacy roundtrip target spheres。多物体场景会额外生成不同颜色的 box/cylinder，并输出一组 D435i RGB/depth 预览，用于后续语言指令目标选择验证。
 
 ## D435i RGB-D 相机
 

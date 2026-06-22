@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import contextlib
 import json
@@ -35,6 +35,7 @@ class RobotMcpServer:
             "get_scene_state": self._get_scene_state,
             "generate_gripper_model": lambda args: skills.generate_gripper_model(),
             "generate_pick_scene": lambda args: skills.generate_pick_scene(),
+            "generate_multi_object_scene": self._generate_multi_object_scene,
             "generate_d435i_scene": lambda args: skills.generate_d435i_scene(),
             "render_d435i_preview": self._render_d435i_preview,
             "vl_locate_object_region": self._vl_locate_object_region,
@@ -134,6 +135,12 @@ class RobotMcpServer:
             show_sites=bool(args.get("show_sites", False)),
         )
 
+    def _generate_multi_object_scene(self, args: dict[str, Any]) -> dict[str, Any]:
+        return skills.generate_multi_object_scene(
+            args.get("objects"),
+            include_d435i=bool(args.get("include_d435i", True)),
+        )
+
     def _render_d435i_preview(self, args: dict[str, Any]) -> dict[str, Any]:
         return skills.render_d435i_preview(
             args.get("output_dir"),
@@ -141,6 +148,7 @@ class RobotMcpServer:
             height=int(args.get("height", 240)),
             seed=int(args.get("seed", 7)),
             pose=str(args.get("pose", "above")),
+            scene_id=str(args.get("scene_id", "gripper_pick_cube_d435i")),
         )
 
     def _vl_locate_object_region(self, args: dict[str, Any]) -> dict[str, Any]:
@@ -302,6 +310,20 @@ class RobotMcpServer:
                 "inputSchema": _object_schema({}),
             },
             {
+                "name": "generate_multi_object_scene",
+                "description": "Generate a tabletop scene with multiple colored boxes/cylinders for language-guided object selection.",
+                "inputSchema": _object_schema(
+                    {
+                        "objects": {
+                            "type": "array",
+                            "description": "Optional object specs. Each item supports shape=box/cylinder, color, rgba, position_xy, and size fields.",
+                            "items": {"type": "object"},
+                        },
+                        "include_d435i": {"type": "boolean", "default": True},
+                    }
+                ),
+            },
+            {
                 "name": "generate_d435i_scene",
                 "description": "Generate the simplified-gripper cube-pick scene with a gripper-mounted D435i camera.",
                 "inputSchema": _object_schema({}),
@@ -312,6 +334,11 @@ class RobotMcpServer:
                 "inputSchema": _object_schema(
                     {
                         "output_dir": {"type": "string"},
+                        "scene_id": {
+                            "type": "string",
+                            "default": "gripper_pick_cube_d435i",
+                            "enum": ["gripper_pick_cube_d435i", "gripper_multi_object_d435i"],
+                        },
                         "width": {"type": "integer", "default": 424, "minimum": 1},
                         "height": {"type": "integer", "default": 240, "minimum": 1},
                         "seed": {"type": "integer", "default": 7},

@@ -21,7 +21,7 @@
     <material name="gripper_finger_mat" rgba="0.06 0.07 0.08 1" />
     <material name="gripper_pad_mat" rgba="0.02 0.02 0.02 1" />
     <material name="pick_table_mat" rgba="0.55 0.57 0.54 1" />
-    <material name="pick_cube_mat" rgba="0.88 0.16 0.10 1" />
+    <material name="grasp_cube_mat" rgba="0.88 0.16 0.1 1" />
     <material name="d435i_body_mat" rgba="0.07 0.075 0.08 1" />
     <material name="d435i_face_mat" rgba="0.015 0.018 0.022 1" />
     <material name="d435i_lens_mat" rgba="0.03 0.08 0.14 1" />
@@ -93,7 +93,7 @@
     <geom name="pick_table" type="box" pos="0.35 -0.55 0.0175" size="0.34 0.28 0.0175" material="pick_table_mat" friction="1.0 0.02 0.002" contype="1" conaffinity="1" />
     <body name="grasp_cube" pos="0.35 -0.55 0.065">
       <freejoint name="grasp_cube_free" />
-      <geom name="grasp_cube_geom" type="box" size="0.016 0.018 0.03" material="pick_cube_mat" rgba="0.88 0.16 0.10 1" mass="0.020" friction="3.0 0.08 0.006" condim="4" solref="0.006 1" solimp="0.95 0.99 0.002" contype="1" conaffinity="1" />
+      <geom name="grasp_cube_geom" type="box" size="0.016 0.018 0.03" material="grasp_cube_mat" rgba="0.88 0.16 0.1 1" mass="0.02" friction="3 0.08 0.006" condim="4" solref="0.006 1" solimp="0.95 0.99 0.002" contype="1" conaffinity="1" />
     </body>
   </worldbody>
   <actuator>

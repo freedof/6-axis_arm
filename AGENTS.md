@@ -1,4 +1,4 @@
-# AGENTS.md
+﻿# AGENTS.md
 
 ## Project
 
@@ -55,6 +55,8 @@ assets/dobot_cr5/mjcf/cr5_with_gripper.xml
 assets/dobot_cr5/mjcf/cr5_with_gripper_d435i.xml
 assets/dobot_cr5/mjcf/cr5_gripper_pick_scene.xml
 assets/dobot_cr5/mjcf/cr5_gripper_d435i_pick_scene.xml
+assets/dobot_cr5/mjcf/cr5_gripper_multi_object_scene.xml
+assets/dobot_cr5/mjcf/cr5_gripper_d435i_multi_object_scene.xml
 assets/dobot_cr5/mjcf/cr5_gripper_pick_planning.xml
 ```
 
@@ -84,6 +86,7 @@ Gripper, scene separation, D435i, and VL checks:
 .venv\Scripts\python src\sim\verify_gripper_model.py
 .venv\Scripts\python src\sim\verify_gripper_pick.py
 .venv\Scripts\python src\sim\verify_scene_separation.py
+.venv\Scripts\python src\sim\verify_multi_object_scene.py
 .venv\Scripts\python src\sim\verify_d435i_camera.py
 .venv\Scripts\python src\sim\verify_vl_region.py
 ```

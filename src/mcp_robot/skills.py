@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -18,8 +18,8 @@ from src.perception.vl_region import locate_manual_region, locate_openai_vision_
 from src.perception.vl_region import region3d_to_dict
 from src.sim.gripper_model import DEFAULT_GRIPPER_MODEL, write_gripper_model
 from src.sim.gripper_pick_motion import plan_pick_trajectory_from_target_3d, simulate_pick
-from src.sim.gripper_pick_scene import CUBE_HALF_SIZE, DEFAULT_PICK_MODEL, TABLE_TOP_Z, write_pick_scene_model
-from src.sim.d435i_model import DEFAULT_D435I_GRIPPER_MODEL, DEFAULT_D435I_PICK_MODEL, write_d435i_pick_scene_model
+from src.sim.gripper_pick_scene import CUBE_HALF_SIZE, DEFAULT_MULTI_OBJECT_MODEL, DEFAULT_MULTI_OBJECT_SPECS, DEFAULT_PICK_MODEL, TABLE_TOP_Z, object_specs_from_config, object_specs_to_dicts, write_multi_object_scene_model, write_pick_scene_model
+from src.sim.d435i_model import DEFAULT_D435I_GRIPPER_MODEL, DEFAULT_D435I_MULTI_OBJECT_MODEL, DEFAULT_D435I_PICK_MODEL, write_d435i_multi_object_scene_model, write_d435i_pick_scene_model
 from src.sim.render_d435i_preview import DEFAULT_OUTPUT_DIR as DEFAULT_D435I_OUTPUT_DIR
 from src.sim.render_d435i_preview import POSE_CHOICES
 from src.sim.render_d435i_preview import render_preview as render_d435i_camera_preview
@@ -53,6 +53,18 @@ SCENES: dict[str, dict[str, Any]] = {
         "description": "CR5 gripper pick scene with a gripper-root D435i RGB-D camera.",
         "dynamic_objects": ["grasp_cube"],
     },
+    "gripper_multi_object": {
+        "name": "Simplified gripper multi-object tabletop scene",
+        "model_path": DEFAULT_MULTI_OBJECT_MODEL,
+        "description": "CR5 gripper scene with multiple colored boxes and cylinders on the table.",
+        "dynamic_objects": [spec.name for spec in DEFAULT_MULTI_OBJECT_SPECS],
+    },
+    "gripper_multi_object_d435i": {
+        "name": "Simplified gripper multi-object scene with D435i",
+        "model_path": DEFAULT_D435I_MULTI_OBJECT_MODEL,
+        "description": "CR5 gripper multi-object tabletop scene with a gripper-root D435i RGB-D camera.",
+        "dynamic_objects": [spec.name for spec in DEFAULT_MULTI_OBJECT_SPECS],
+    },
 }
 
 
@@ -72,6 +84,8 @@ def get_robot_capabilities() -> dict[str, Any]:
             "pick_planning": _relative(ROOT / "assets" / "dobot_cr5" / "mjcf" / "cr5_gripper_pick_planning.xml"),
             "gripper_d435i": _relative(DEFAULT_D435I_GRIPPER_MODEL),
             "pick_scene_d435i": _relative(DEFAULT_D435I_PICK_MODEL),
+            "multi_object_scene": _relative(DEFAULT_MULTI_OBJECT_MODEL),
+            "multi_object_scene_d435i": _relative(DEFAULT_D435I_MULTI_OBJECT_MODEL),
         },
         "actuation": {
             "baseline_dof": 6,
@@ -81,6 +95,7 @@ def get_robot_capabilities() -> dict[str, Any]:
         "available_skills": [
             "generate_gripper_model",
             "generate_pick_scene",
+            "generate_multi_object_scene",
             "simulate_pick_cube",
             "render_pick_cube_gif",
             "pick_cube",
@@ -123,6 +138,10 @@ def get_scene_state(scene_id: str = "gripper_pick_cube") -> dict[str, Any]:
         model_path = write_pick_scene_model(DEFAULT_PICK_MODEL)
     elif scene_id == "gripper_pick_cube_d435i":
         model_path = write_d435i_pick_scene_model(DEFAULT_D435I_PICK_MODEL)
+    elif scene_id == "gripper_multi_object":
+        model_path = write_multi_object_scene_model(DEFAULT_MULTI_OBJECT_MODEL)
+    elif scene_id == "gripper_multi_object_d435i":
+        model_path = write_d435i_multi_object_scene_model(DEFAULT_D435I_MULTI_OBJECT_MODEL)
     else:
         model_path = Path(SCENES[scene_id]["model_path"])
 
@@ -153,7 +172,16 @@ def get_scene_state(scene_id: str = "gripper_pick_cube") -> dict[str, Any]:
                 "friction": [1.0, 0.02, 0.002],
             }
         }
-    if scene_id == "gripper_pick_cube_d435i":
+    if scene_id in ("gripper_multi_object", "gripper_multi_object_d435i"):
+        state["objects"] = object_specs_to_dicts(DEFAULT_MULTI_OBJECT_SPECS)
+        state["environment"] = {
+            "table": {
+                "name": "pick_table",
+                "top_z_m": TABLE_TOP_Z,
+                "friction": [1.0, 0.02, 0.002],
+            }
+        }
+    if scene_id in ("gripper_pick_cube_d435i", "gripper_multi_object_d435i"):
         state["sensors"] = [
             {
                 "name": "d435i_depth",
@@ -189,6 +217,23 @@ def generate_pick_scene() -> dict[str, Any]:
     }
 
 
+def generate_multi_object_scene(objects: list[dict[str, Any]] | None = None, *, include_d435i: bool = True) -> dict[str, Any]:
+    specs = DEFAULT_MULTI_OBJECT_SPECS if objects is None else object_specs_from_config(objects)
+    model_path = write_multi_object_scene_model(DEFAULT_MULTI_OBJECT_MODEL, objects=specs)
+    response: dict[str, Any] = {
+        "status": "ok",
+        "scene_id": "gripper_multi_object",
+        "model_path": _relative(model_path),
+        "objects": object_specs_to_dicts(specs),
+    }
+    if include_d435i:
+        d435i_path = write_d435i_multi_object_scene_model(DEFAULT_D435I_MULTI_OBJECT_MODEL, objects=specs)
+        response["d435i_scene_id"] = "gripper_multi_object_d435i"
+        response["d435i_model_path"] = _relative(d435i_path)
+        response["camera_names"] = ["d435i_depth", "d435i_rgb"]
+    return response
+
+
 def generate_d435i_scene() -> dict[str, Any]:
     model_path = write_d435i_pick_scene_model(DEFAULT_D435I_PICK_MODEL)
     return {
@@ -206,15 +251,21 @@ def render_d435i_preview(
     height: int = 240,
     seed: int = 7,
     pose: str = "above",
+    scene_id: str = "gripper_pick_cube_d435i",
 ) -> dict[str, Any]:
-    model_path = write_d435i_pick_scene_model(DEFAULT_D435I_PICK_MODEL)
+    if scene_id == "gripper_pick_cube_d435i":
+        model_path = write_d435i_pick_scene_model(DEFAULT_D435I_PICK_MODEL)
+    elif scene_id == "gripper_multi_object_d435i":
+        model_path = write_d435i_multi_object_scene_model(DEFAULT_D435I_MULTI_OBJECT_MODEL)
+    else:
+        raise ValueError(f"render_d435i_preview requires a D435i scene, got: {scene_id}")
     output = DEFAULT_D435I_OUTPUT_DIR if output_dir is None else Path(output_dir)
     if not output.is_absolute():
         output = ROOT / output
     result = render_d435i_camera_preview(model_path, output, width=width, height=height, seed=seed, pose=pose)
     return {
         "status": "ok",
-        "scene_id": "gripper_pick_cube_d435i",
+        "scene_id": scene_id,
         "model_path": _relative(model_path),
         "pose": result["pose"],
         "camera": "d435i_depth",
@@ -231,7 +282,6 @@ def render_d435i_preview(
         "raw_depth_stats": result["raw_depth_stats"],
         "noisy_depth_stats": result["noisy_depth_stats"],
     }
-
 
 def vl_locate_object_region(
     prompt: str,

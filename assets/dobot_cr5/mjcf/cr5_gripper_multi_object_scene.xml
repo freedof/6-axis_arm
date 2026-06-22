@@ -1,4 +1,4 @@
-<mujoco model="dobot_cr5_gripper_pick_scene">
+<mujoco model="dobot_cr5_gripper_multi_object_scene">
   <compiler angle="radian" autolimits="true" />
   <option timestep="0.002" gravity="0 0 -9.81" integrator="implicitfast" />
   <visual>
@@ -21,7 +21,11 @@
     <material name="gripper_finger_mat" rgba="0.06 0.07 0.08 1" />
     <material name="gripper_pad_mat" rgba="0.02 0.02 0.02 1" />
     <material name="pick_table_mat" rgba="0.55 0.57 0.54 1" />
-    <material name="grasp_cube_mat" rgba="0.88 0.16 0.1 1" />
+    <material name="red_cube_mat" rgba="0.88 0.16 0.1 1" />
+    <material name="blue_cube_mat" rgba="0.12 0.32 0.86 1" />
+    <material name="green_cylinder_mat" rgba="0.12 0.64 0.28 1" />
+    <material name="yellow_cylinder_mat" rgba="0.95 0.74 0.12 1" />
+    <material name="purple_cube_mat" rgba="0.54 0.22 0.8 1" />
   </asset>
   <worldbody>
     <light name="key" pos="1.5 -2.0 2.5" dir="-1 1 -1" diffuse="0.8 0.8 0.8" />
@@ -77,9 +81,25 @@
       </body>
     </body>
     <geom name="pick_table" type="box" pos="0.35 -0.55 0.0175" size="0.34 0.28 0.0175" material="pick_table_mat" friction="1.0 0.02 0.002" contype="1" conaffinity="1" />
-    <body name="grasp_cube" pos="0.35 -0.55 0.065">
-      <freejoint name="grasp_cube_free" />
-      <geom name="grasp_cube_geom" type="box" size="0.016 0.018 0.03" material="grasp_cube_mat" rgba="0.88 0.16 0.1 1" mass="0.02" friction="3 0.08 0.006" condim="4" solref="0.006 1" solimp="0.95 0.99 0.002" contype="1" conaffinity="1" />
+    <body name="red_cube" pos="0.35 -0.55 0.065">
+      <freejoint name="red_cube_free" />
+      <geom name="red_cube_geom" type="box" size="0.016 0.018 0.03" material="red_cube_mat" rgba="0.88 0.16 0.1 1" mass="0.02" friction="3 0.08 0.006" condim="4" solref="0.006 1" solimp="0.95 0.99 0.002" contype="1" conaffinity="1" />
+    </body>
+    <body name="blue_cube" pos="0.26 -0.51 0.061">
+      <freejoint name="blue_cube_free" />
+      <geom name="blue_cube_geom" type="box" size="0.017 0.017 0.026" material="blue_cube_mat" rgba="0.12 0.32 0.86 1" mass="0.02" friction="3 0.08 0.006" condim="4" solref="0.006 1" solimp="0.95 0.99 0.002" contype="1" conaffinity="1" />
+    </body>
+    <body name="green_cylinder" pos="0.44 -0.5 0.063">
+      <freejoint name="green_cylinder_free" />
+      <geom name="green_cylinder_geom" type="cylinder" size="0.018 0.028" material="green_cylinder_mat" rgba="0.12 0.64 0.28 1" mass="0.02" friction="3 0.08 0.006" condim="4" solref="0.006 1" solimp="0.95 0.99 0.002" contype="1" conaffinity="1" />
+    </body>
+    <body name="yellow_cylinder" pos="0.29 -0.64 0.059">
+      <freejoint name="yellow_cylinder_free" />
+      <geom name="yellow_cylinder_geom" type="cylinder" size="0.016 0.024" material="yellow_cylinder_mat" rgba="0.95 0.74 0.12 1" mass="0.02" friction="3 0.08 0.006" condim="4" solref="0.006 1" solimp="0.95 0.99 0.002" contype="1" conaffinity="1" />
+    </body>
+    <body name="purple_cube" pos="0.45 -0.63 0.06">
+      <freejoint name="purple_cube_free" />
+      <geom name="purple_cube_geom" type="box" size="0.015 0.019 0.025" material="purple_cube_mat" rgba="0.54 0.22 0.8 1" mass="0.02" friction="3 0.08 0.006" condim="4" solref="0.006 1" solimp="0.95 0.99 0.002" contype="1" conaffinity="1" />
     </body>
   </worldbody>
   <actuator>
