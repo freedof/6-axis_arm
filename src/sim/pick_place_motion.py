@@ -16,6 +16,7 @@ from src.planning.rrt_connect import RRTConnectConfig
 from src.planning.singularity import SingularityChecker
 from src.planning.trajectory import parameterize_joint_path
 from src.robot.ik import solve_ik_multi_start
+from src.robot.kinematics import forward_kinematics
 from src.robot.model import dobot_cr5_simplified
 from src.sim.demo_xyz_joint_roundtrip import TOOL_DOWN_ROTATION, make_tool_pose
 from src.sim.gripper_model import GRIPPER_OPEN_QPOS
@@ -35,6 +36,7 @@ from src.sim.gripper_pick_motion import (
     PLANNED_PICK_CLOSE_SECONDS,
     PLANNED_PICK_FINAL_DWELL_SECONDS,
     PLANNED_PICK_READY_DWELL_SECONDS,
+    POST_GRASP_SETTLE_SECONDS,
     ROBOT_DOF,
     ABOVE_CENTER_Z_LIFT,
     READY_CENTER_OFFSET,
@@ -43,14 +45,15 @@ from src.sim.gripper_pick_motion import (
     _smoothstep,
     _solve_gripper_center_pose,
 )
-from src.sim.gripper_pick_scene import DEFAULT_MULTI_OBJECT_MODEL, TABLE_TOP_Z, write_multi_object_scene_model
+from src.sim.gripper_pick_scene import DEFAULT_MULTI_OBJECT_MODEL, DEFAULT_MULTI_OBJECT_SPECS, TABLE_TOP_Z, write_multi_object_scene_model
 from src.sim.planning_model import DEFAULT_PICK_PLANNING_MODEL, write_planning_model
 
 PICK_PLACE_GRASP_Z_LIFT = 0.045
-PLACE_RELEASE_Z_LIFT = PICK_PLACE_GRASP_Z_LIFT
+PLACE_RELEASE_Z_LIFT = PICK_PLACE_GRASP_Z_LIFT + 0.010
 PICK_PLACE_VERTICAL_CLEARANCE = 0.060
 PICK_ABOVE_Z_LIFT = PICK_PLACE_GRASP_Z_LIFT + PICK_PLACE_VERTICAL_CLEARANCE
 PLACE_ABOVE_Z_LIFT = PLACE_RELEASE_Z_LIFT + PICK_PLACE_VERTICAL_CLEARANCE
+PICK_PLACE_TRANSFER_CLEARANCE = 0.120
 PLACE_OPEN_SECONDS = 0.7
 PLACE_RETREAT_DWELL_SECONDS = 0.8
 SEQUENCE_BRIDGE_SECONDS = 3.0
@@ -59,6 +62,8 @@ SEQUENCE_BRIDGE_PLACE_CLEARANCE = 0.260
 PICK_PLACE_CANDIDATE_YAWS = (0.0, np.pi, 0.5 * np.pi, -0.5 * np.pi)
 SEQUENCE_BRIDGE_PICK_CLEARANCE = 0.245
 SEQUENCE_BRIDGE_HOME_CENTER = np.array([0.35, -0.55, SEQUENCE_BRIDGE_MIN_CENTER_Z], dtype=float)
+CARRIED_OBJECT_HALF_XY = 0.030
+CARRIED_OBJECT_COLLISION_MARGIN = 0.010
 
 
 @dataclass(frozen=True)
@@ -98,6 +103,7 @@ class PlannedPickPlaceTrajectory:
             + PLANNED_PICK_ABOVE_DWELL_SECONDS
             + self.pick_above_to_grasp.trajectory.duration
             + PLANNED_PICK_CLOSE_SECONDS
+            + POST_GRASP_SETTLE_SECONDS
             + self.pick_grasp_to_lift.trajectory.duration
             + self.lift_to_place_above.trajectory.duration
             + PLANNED_PICK_ABOVE_DWELL_SECONDS
@@ -137,6 +143,15 @@ class PickPlaceSequenceResult:
         return all(result.placed for result in self.item_results)
 
 
+def _pick_grasp_z_lift(object_half_height: float) -> float:
+    half_height = float(object_half_height)
+    return float(np.clip(0.55 * half_height + 0.016, 0.029, 0.036))
+
+
+def _place_release_z_lift(object_half_height: float) -> float:
+    return _pick_grasp_z_lift(object_half_height) + 0.010
+
+
 def plan_pick_place_trajectory(
     target_surface_world: np.ndarray,
     place_xy: np.ndarray | list[float] | tuple[float, float],
@@ -158,13 +173,33 @@ def plan_pick_place_trajectory(
     half_height = float(object_half_height)
     object_center = target - np.array([0.0, 0.0, half_height], dtype=float)
     place_center = np.array([place_xy_array[0], place_xy_array[1], float(placement_surface_z) + half_height], dtype=float)
-    poses = solve_pick_place_poses(object_center, place_center, grasp_yaw=grasp_yaw, seed_q=seed_q)
-    pick_grasp_center = object_center + np.array([0.0, 0.0, PICK_PLACE_GRASP_Z_LIFT], dtype=float)
-    pick_above_center = object_center + np.array([0.0, 0.0, PICK_ABOVE_Z_LIFT], dtype=float)
+    pick_grasp_z_lift = _pick_grasp_z_lift(half_height)
+    place_release_z_lift = _place_release_z_lift(half_height)
+    pick_above_z_lift = pick_grasp_z_lift + PICK_PLACE_VERTICAL_CLEARANCE
+    place_above_z_lift = place_release_z_lift + PICK_PLACE_VERTICAL_CLEARANCE
+    transfer_z_lift = pick_grasp_z_lift + PICK_PLACE_TRANSFER_CLEARANCE
+    poses = solve_pick_place_poses(
+        object_center,
+        place_center,
+        object_half_height=half_height,
+        grasp_yaw=grasp_yaw,
+        seed_q=seed_q,
+    )
+    pick_grasp_center = object_center + np.array([0.0, 0.0, pick_grasp_z_lift], dtype=float)
+    pick_above_center = object_center + np.array([0.0, 0.0, pick_above_z_lift], dtype=float)
     pick_lift_center = pick_above_center
-    place_above_center = place_center + np.array([0.0, 0.0, PLACE_ABOVE_Z_LIFT], dtype=float)
-    place_center_for_gripper = place_center + np.array([0.0, 0.0, PLACE_RELEASE_Z_LIFT], dtype=float)
-    retreat_center = place_center + np.array([0.0, 0.0, PLACE_ABOVE_Z_LIFT], dtype=float)
+    transfer_center_z = max(
+        float(object_center[2] + transfer_z_lift),
+        float(place_center[2] + place_release_z_lift + PICK_PLACE_TRANSFER_CLEARANCE),
+        TABLE_TOP_Z + 0.170,
+    )
+    pick_transfer_center = pick_lift_center.copy()
+    pick_transfer_center[2] = transfer_center_z
+    place_transfer_center = place_center.copy()
+    place_transfer_center[2] = transfer_center_z
+    place_above_center = place_center + np.array([0.0, 0.0, place_above_z_lift], dtype=float)
+    place_center_for_gripper = place_center + np.array([0.0, 0.0, place_release_z_lift], dtype=float)
+    retreat_center = place_above_center.copy()
 
     robot = dobot_cr5_simplified()
     source_model = write_multi_object_scene_model(source_model) if source_model == DEFAULT_MULTI_OBJECT_MODEL else Path(source_model)
@@ -221,16 +256,18 @@ def plan_pick_place_trajectory(
             max_joint_velocity=PICK_LIFT_MAX_JOINT_VELOCITY,
             max_joint_acceleration=PICK_LIFT_MAX_JOINT_ACCELERATION,
         ),
-        lift_to_place_above=_validated_cartesian_or_planned_segment(
+        lift_to_place_above=_validated_transfer_segment(
             "lift_to_place_above",
             robot,
             poses.q_pick_lift,
             poses.q_place_above,
-            pick_lift_center,
-            place_above_center,
+            (pick_lift_center, pick_transfer_center, place_transfer_center, place_above_center),
             grasp_yaw,
             state_valid,
             config,
+            object_center=object_center,
+            object_half_height=half_height,
+            pick_grasp_z_lift=pick_grasp_z_lift,
             shortcut=shortcut,
             max_joint_velocity=0.45,
             max_joint_acceleration=0.80,
@@ -261,17 +298,27 @@ def plan_pick_place_trajectory(
     )
 
 
-def solve_pick_place_poses(object_center: np.ndarray, place_center: np.ndarray, *, grasp_yaw: float = 0.0, seed_q: np.ndarray | None = None) -> PickPlacePoses:
+def solve_pick_place_poses(
+    object_center: np.ndarray,
+    place_center: np.ndarray,
+    *,
+    object_half_height: float,
+    grasp_yaw: float = 0.0,
+    seed_q: np.ndarray | None = None,
+) -> PickPlacePoses:
     robot = dobot_cr5_simplified()
     object_center = np.asarray(object_center, dtype=float)
     place_center = np.asarray(place_center, dtype=float)
-    pick_grasp_center = object_center + np.array([0.0, 0.0, PICK_PLACE_GRASP_Z_LIFT], dtype=float)
-    pick_above_center = object_center + np.array([0.0, 0.0, PICK_ABOVE_Z_LIFT], dtype=float)
+    half_height = float(object_half_height)
+    pick_grasp_z_lift = _pick_grasp_z_lift(half_height)
+    place_release_z_lift = _place_release_z_lift(half_height)
+    pick_grasp_center = object_center + np.array([0.0, 0.0, pick_grasp_z_lift], dtype=float)
+    pick_above_center = object_center + np.array([0.0, 0.0, pick_grasp_z_lift + PICK_PLACE_VERTICAL_CLEARANCE], dtype=float)
     pick_lift_center = pick_above_center
     ready_center = object_center + READY_CENTER_OFFSET
-    place_above_center = place_center + np.array([0.0, 0.0, PLACE_ABOVE_Z_LIFT], dtype=float)
-    place_center_for_gripper = place_center + np.array([0.0, 0.0, PLACE_RELEASE_Z_LIFT], dtype=float)
-    retreat_center = place_center + np.array([0.0, 0.0, PLACE_ABOVE_Z_LIFT], dtype=float)
+    place_above_center = place_center + np.array([0.0, 0.0, place_release_z_lift + PICK_PLACE_VERTICAL_CLEARANCE], dtype=float)
+    place_center_for_gripper = place_center + np.array([0.0, 0.0, place_release_z_lift], dtype=float)
+    retreat_center = place_above_center.copy()
 
     q_ready_seeds = [] if seed_q is None else [np.asarray(seed_q, dtype=float)]
     q_ready = _solve_gripper_center_pose_with_yaw(robot, ready_center, q_ready_seeds, grasp_yaw)
@@ -423,6 +470,112 @@ def _validated_cartesian_or_planned_segment(
     )
 
 
+def _validated_transfer_segment(
+    name: str,
+    robot,
+    q_start: np.ndarray,
+    q_goal: np.ndarray,
+    centers: tuple[np.ndarray, ...],
+    grasp_yaw: float,
+    state_valid,
+    config: RRTConnectConfig,
+    *,
+    object_center: np.ndarray,
+    object_half_height: float,
+    pick_grasp_z_lift: float,
+    shortcut: bool,
+    max_joint_velocity: float,
+    max_joint_acceleration: float,
+    cartesian_reason: str = "cartesian_high_transfer_validated",
+) -> PlannedPickSegment:
+    base_centers = tuple(np.asarray(center, dtype=float).copy() for center in centers)
+    if len(base_centers) < 2:
+        raise ValueError("transfer centers must contain at least start and goal")
+    start_z = float(base_centers[0][2])
+    goal_z = float(base_centers[-1][2])
+    for extra_z in (0.0, 0.035, 0.070):
+        trial_centers = [center.copy() for center in base_centers]
+        high_z = max(float(center[2]) for center in trial_centers[1:-1]) + extra_z if len(trial_centers) > 2 else max(start_z, goal_z) + extra_z
+        for center in trial_centers[1:-1]:
+            center[2] = high_z
+        cartesian = _cartesian_center_path_segment(
+            name,
+            robot,
+            q_start,
+            q_goal,
+            tuple(trial_centers),
+            grasp_yaw,
+            max_joint_velocity=max_joint_velocity,
+            max_joint_acceleration=max_joint_acceleration,
+            reason=cartesian_reason if extra_z == 0.0 else f"{cartesian_reason}_raised_{extra_z:.3f}m",
+        )
+        if _joint_path_valid(cartesian.path, state_valid, config.edge_resolution) and _carried_object_path_valid(
+            robot,
+            cartesian.path,
+            object_center=object_center,
+            object_half_height=object_half_height,
+            pick_grasp_z_lift=pick_grasp_z_lift,
+            edge_resolution=config.edge_resolution,
+        ):
+            return cartesian
+    return _plan_segment(
+        name,
+        robot,
+        q_start,
+        q_goal,
+        state_valid,
+        config,
+        shortcut=shortcut,
+        max_joint_velocity=max_joint_velocity,
+        max_joint_acceleration=max_joint_acceleration,
+    )
+
+
+def _cartesian_center_path_segment(
+    name: str,
+    robot,
+    q_start: np.ndarray,
+    q_goal: np.ndarray,
+    centers: tuple[np.ndarray, ...],
+    grasp_yaw: float,
+    *,
+    max_joint_velocity: float,
+    max_joint_acceleration: float,
+    samples_per_leg: int = 4,
+    reason: str = "cartesian_center_path_control",
+) -> PlannedPickSegment:
+    center_waypoints = [np.asarray(centers[0], dtype=float)]
+    for start, goal in zip(centers[:-1], centers[1:]):
+        start = np.asarray(start, dtype=float)
+        goal = np.asarray(goal, dtype=float)
+        for alpha in np.linspace(0.0, 1.0, max(2, samples_per_leg) + 1)[1:]:
+            center_waypoints.append((1.0 - float(alpha)) * start + float(alpha) * goal)
+
+    q_start_array = np.asarray(q_start, dtype=float)
+    q_goal_array = np.asarray(q_goal, dtype=float)
+    waypoints = [q_start_array]
+    previous_q = q_start_array
+    for center in center_waypoints[1:-1]:
+        q = _solve_gripper_center_pose_with_yaw(robot, center, [previous_q, q_goal_array], grasp_yaw)
+        waypoints.append(q)
+        previous_q = q
+    waypoints.append(q_goal_array)
+    path = _unwrap_revolute_waypoints(robot, tuple(waypoints))
+    trajectory = parameterize_joint_path(
+        path,
+        max_joint_velocity=max_joint_velocity,
+        max_joint_acceleration=max_joint_acceleration,
+    )
+    return PlannedPickSegment(
+        name=name,
+        raw_path=path,
+        path=path,
+        trajectory=trajectory,
+        iterations=0,
+        reason=reason,
+    )
+
+
 def _joint_path_valid(path: tuple[np.ndarray, ...] | list[np.ndarray], state_valid, edge_resolution: float) -> bool:
     waypoints = tuple(np.asarray(q, dtype=float) for q in path)
     if not waypoints:
@@ -437,6 +590,67 @@ def _joint_path_valid(path: tuple[np.ndarray, ...] | list[np.ndarray], state_val
             q = (1.0 - alpha) * q_from + alpha * q_to
             if not state_valid(q):
                 return False
+    return True
+
+
+def _carried_object_path_valid(
+    robot,
+    path: tuple[np.ndarray, ...] | list[np.ndarray],
+    *,
+    object_center: np.ndarray,
+    object_half_height: float,
+    pick_grasp_z_lift: float,
+    edge_resolution: float,
+) -> bool:
+    waypoints = tuple(np.asarray(q, dtype=float) for q in path)
+    if not waypoints:
+        return False
+    for q_from, q_to in zip(waypoints[:-1], waypoints[1:]):
+        distance = float(np.linalg.norm(q_to - q_from))
+        steps = max(1, int(np.ceil(distance / edge_resolution)))
+        for step in range(steps + 1):
+            alpha = step / steps
+            q = (1.0 - alpha) * q_from + alpha * q_to
+            if not _carried_object_state_valid(
+                robot,
+                q,
+                object_center=object_center,
+                object_half_height=object_half_height,
+                pick_grasp_z_lift=pick_grasp_z_lift,
+            ):
+                return False
+    return True
+
+
+def _carried_object_state_valid(
+    robot,
+    q: np.ndarray,
+    *,
+    object_center: np.ndarray,
+    object_half_height: float,
+    pick_grasp_z_lift: float,
+) -> bool:
+    fk = forward_kinematics(robot, q)
+    gripper_center = fk.position + fk.rotation[:, 2] * GRASP_CENTER_OFFSET
+    carried_center = gripper_center - np.array([0.0, 0.0, float(pick_grasp_z_lift)], dtype=float)
+    carried_half = np.array([CARRIED_OBJECT_HALF_XY, CARRIED_OBJECT_HALF_XY, float(object_half_height)], dtype=float)
+    source_xy = np.asarray(object_center, dtype=float)[:2]
+
+    for spec in DEFAULT_MULTI_OBJECT_SPECS:
+        obstacle_xy = np.asarray(spec.position_xy, dtype=float)
+        if float(np.linalg.norm(obstacle_xy - source_xy)) < 0.055:
+            continue
+        if spec.shape == "box":
+            obstacle_half = np.array([float(spec.size[0]), float(spec.size[1]), float(spec.size[2])], dtype=float)
+            obstacle_center = np.array([obstacle_xy[0], obstacle_xy[1], TABLE_TOP_Z + obstacle_half[2]], dtype=float)
+        elif spec.shape == "cylinder":
+            obstacle_half = np.array([float(spec.size[0]), float(spec.size[0]), float(spec.size[1])], dtype=float)
+            obstacle_center = np.array([obstacle_xy[0], obstacle_xy[1], TABLE_TOP_Z + obstacle_half[2]], dtype=float)
+        else:
+            continue
+        combined_half = carried_half + obstacle_half + CARRIED_OBJECT_COLLISION_MARGIN
+        if np.all(np.abs(carried_center - obstacle_center) <= combined_half):
+            return False
     return True
 
 
@@ -589,6 +803,7 @@ def pick_place_command_at_time(planned: PlannedPickPlaceTrajectory, t: float) ->
         ("dwell_pick_above", PLANNED_PICK_ABOVE_DWELL_SECONDS, planned.poses.q_pick_above, GRIPPER_OPEN_QPOS),
         (planned.pick_above_to_grasp, GRIPPER_OPEN_QPOS),
         ("close", PLANNED_PICK_CLOSE_SECONDS, planned.poses.q_pick_grasp, None),
+        ("post_grasp_settle", POST_GRASP_SETTLE_SECONDS, planned.poses.q_pick_grasp, GRIPPER_CLOSED_QPOS),
         (planned.pick_grasp_to_lift, GRIPPER_CLOSED_QPOS),
         (planned.lift_to_place_above, GRIPPER_CLOSED_QPOS),
         ("dwell_place_above", PLANNED_PICK_ABOVE_DWELL_SECONDS, planned.poses.q_place_above, GRIPPER_CLOSED_QPOS),

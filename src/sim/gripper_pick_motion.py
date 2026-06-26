@@ -34,6 +34,7 @@ GRIPPER_CLOSED_QPOS = 0.0
 PLANNED_PICK_READY_DWELL_SECONDS = 0.6
 PLANNED_PICK_ABOVE_DWELL_SECONDS = 0.4
 PLANNED_PICK_CLOSE_SECONDS = 0.8
+POST_GRASP_SETTLE_SECONDS = 0.4
 PLANNED_PICK_FINAL_DWELL_SECONDS = 1.0
 PICK_TRAVEL_MAX_JOINT_VELOCITY = 0.75
 PICK_TRAVEL_MAX_JOINT_ACCELERATION = 1.40
@@ -86,6 +87,7 @@ class PlannedPickTrajectory:
             + PLANNED_PICK_ABOVE_DWELL_SECONDS
             + self.above_to_grasp.trajectory.duration
             + PLANNED_PICK_CLOSE_SECONDS
+            + POST_GRASP_SETTLE_SECONDS
             + self.grasp_to_lift.trajectory.duration
             + PLANNED_PICK_FINAL_DWELL_SECONDS
         )
@@ -276,6 +278,10 @@ def planned_command_at_time(planned: PlannedPickTrajectory, t: float) -> tuple[n
         return planned.poses.q_grasp, float(gripper)
 
     t -= PLANNED_PICK_CLOSE_SECONDS
+    if t < POST_GRASP_SETTLE_SECONDS:
+        return planned.poses.q_grasp, GRIPPER_CLOSED_QPOS
+
+    t -= POST_GRASP_SETTLE_SECONDS
     if t < planned.grasp_to_lift.trajectory.duration:
         q, _, _ = planned.grasp_to_lift.trajectory.sample(t)
         return q, GRIPPER_CLOSED_QPOS

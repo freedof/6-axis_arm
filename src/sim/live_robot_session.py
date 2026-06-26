@@ -26,6 +26,7 @@ from src.sim.pick_place_motion import (
     PLACE_RETREAT_DWELL_SECONDS,
     PLANNED_PICK_ABOVE_DWELL_SECONDS,
     PLANNED_PICK_CLOSE_SECONDS,
+    POST_GRASP_SETTLE_SECONDS,
     PickPlaceSequenceItem,
     sequence_bridge_command_at_time,
     sequence_bridge_waypoints,
@@ -114,10 +115,30 @@ def main() -> None:
                     max_parallel_vl=args.max_parallel_vl,
                     fps=args.fps,
                 )
-                _write_robot_state(command_path.parent / "robot_state.json", model, data, phase="completed")
-                _write_status(status_path, {**session_info, "status": "completed", "hold_seconds": args.hold_seconds})
-                _hold_then_close(viewer, args.hold_seconds)
-                break
+                wait_pose = _first_photo_pose(command)
+                _write_status(
+                    status_path,
+                    {
+                        **session_info,
+                        "status": "running",
+                        "phase": "returning_to_photo_pose_1",
+                        "waiting_pose": wait_pose,
+                        "last_completed_instruction": command.get("instruction"),
+                    },
+                )
+                _return_to_photo_pose_1(model, data, viewer, wait_pose=wait_pose, fps=args.fps)
+                _write_robot_state(command_path.parent / "robot_state.json", model, data, phase="waiting_photo_pose_1")
+                _write_status(
+                    status_path,
+                    {
+                        **session_info,
+                        "status": "waiting",
+                        "phase": "waiting_photo_pose_1",
+                        "waiting_pose": wait_pose,
+                        "last_completion_status": "completed",
+                        "last_completed_instruction": command.get("instruction"),
+                    },
+                )
             except Exception as exc:
                 _write_status(status_path, {**session_info, "status": "waiting", "last_error": str(exc), "recoverable": True})
                 continue
@@ -243,6 +264,35 @@ def _play_scan_motion(model: mujoco.MjModel, data: mujoco.MjData, viewer, *, pos
         _play_joint_interpolation(model, data, viewer, current, target, gripper=GRIPPER_OPEN_QPOS, duration_s=0.65, fps=fps)
         current = target.copy()
         _hold(model, data, viewer, duration_s=0.15, fps=fps)
+
+
+def _first_photo_pose(command: dict[str, Any]) -> str:
+    poses = tuple(command.get("poses") or DEFAULT_POSES)
+    return str(poses[0] if poses else DEFAULT_POSES[0])
+
+
+def _return_to_photo_pose_1(
+    model: mujoco.MjModel,
+    data: mujoco.MjData,
+    viewer,
+    *,
+    wait_pose: str,
+    fps: int,
+) -> None:
+    trajectory = solve_pick_trajectory()
+    target = _trajectory_pose(trajectory, wait_pose)
+    current = data.qpos[:ROBOT_DOF].copy()
+    _play_joint_interpolation(
+        model,
+        data,
+        viewer,
+        current,
+        target,
+        gripper=GRIPPER_OPEN_QPOS,
+        duration_s=0.9,
+        fps=fps,
+    )
+    _settle_robot_q(model, data, viewer, target, gripper=GRIPPER_OPEN_QPOS, duration_s=0.8, fps=fps)
 
 
 def _scan_and_localize_multi_target(
@@ -372,6 +422,7 @@ def _play_pick_place_item(
     _record_waypoint(trace_records, trace_path, model, data, item, item_index, grasp_label, "grasp_before_close", item.planned_trajectory.poses.q_pick_grasp)
 
     _play_gripper_transition(model, data, viewer, item.planned_trajectory.poses.q_pick_grasp, GRIPPER_OPEN_QPOS, GRIPPER_CLOSED_QPOS, PLANNED_PICK_CLOSE_SECONDS, fps)
+    _hold_q(model, data, viewer, item.planned_trajectory.poses.q_pick_grasp, GRIPPER_CLOSED_QPOS, POST_GRASP_SETTLE_SECONDS, fps)
     _play_planned_segment(model, data, viewer, item.planned_trajectory.pick_grasp_to_lift, GRIPPER_CLOSED_QPOS, fps=fps)
     _settle_robot_q(model, data, viewer, item.planned_trajectory.poses.q_pick_lift, gripper=GRIPPER_CLOSED_QPOS, duration_s=0.8, fps=fps)
     _record_waypoint(trace_records, trace_path, model, data, item, item_index, pick_above_label, "pick_above_after_grasp", item.planned_trajectory.poses.q_pick_lift)

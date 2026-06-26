@@ -97,6 +97,20 @@ def _d435i_body() -> ET.Element:
         body,
         "geom",
         {
+            "name": "collision_d435i_body_envelope",
+            "type": "box",
+            "pos": "0 0 0.002",
+            "size": "0.047 0.014 0.017",
+            "rgba": "0.10 0.95 0.35 0.16",
+            "contype": "0",
+            "conaffinity": "0",
+            "group": "2",
+        },
+    )
+    ET.SubElement(
+        body,
+        "geom",
+        {
             "name": "d435i_front_face",
             "type": "box",
             "pos": "0 0 0.0135",

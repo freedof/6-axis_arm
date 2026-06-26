@@ -28,10 +28,10 @@ TRAY_WALL_THICKNESS = 0.006
 TRAY_WALL_HEIGHT = 0.026
 TRAY_FLOOR_TOP_Z = TABLE_TOP_Z + TRAY_HALF_SIZE[2] * 2.0
 TRAY_PLACE_SLOTS = (
-    (0.555, -0.295),
-    (0.715, -0.435),
-    (0.555, -0.445),
-    (0.725, -0.295),
+    (0.575, -0.310),
+    (0.705, -0.430),
+    (0.575, -0.430),
+    (0.705, -0.310),
 )
 
 
@@ -56,11 +56,11 @@ class TableObjectSpec:
 
 
 DEFAULT_MULTI_OBJECT_SPECS = (
-    TableObjectSpec("red_cube", "box", "red", (0.88, 0.16, 0.10, 1.0), (0.33, -0.57), (0.016, 0.018, 0.030)),
-    TableObjectSpec("blue_cube", "box", "blue", (0.12, 0.32, 0.86, 1.0), (0.24, -0.53), (0.017, 0.017, 0.026)),
-    TableObjectSpec("green_cylinder", "cylinder", "green", (0.12, 0.64, 0.28, 1.0), (0.39, -0.46), (0.018, 0.028)),
-    TableObjectSpec("yellow_cylinder", "cylinder", "yellow", (0.95, 0.74, 0.12, 1.0), (0.29, -0.64), (0.016, 0.024)),
-    TableObjectSpec("purple_cube", "box", "purple", (0.54, 0.22, 0.80, 1.0), (0.43, -0.59), (0.015, 0.019, 0.025)),
+    TableObjectSpec("red_cube", "box", "red", (0.88, 0.16, 0.10, 1.0), (0.295, -0.57), (0.016, 0.018, 0.030)),
+    TableObjectSpec("blue_cube", "box", "blue", (0.12, 0.32, 0.86, 1.0), (0.205, -0.53), (0.017, 0.017, 0.026)),
+    TableObjectSpec("green_cylinder", "cylinder", "green", (0.12, 0.64, 0.28, 1.0), (0.355, -0.46), (0.018, 0.028)),
+    TableObjectSpec("yellow_cylinder", "cylinder", "yellow", (0.95, 0.74, 0.12, 1.0), (0.255, -0.64), (0.016, 0.024)),
+    TableObjectSpec("purple_cube", "box", "purple", (0.54, 0.22, 0.80, 1.0), (0.395, -0.59), (0.015, 0.019, 0.025)),
 )
 
 
@@ -345,7 +345,7 @@ def _tune_pick_actuators(root: ET.Element) -> None:
             position.set("kv", "60")
             position.set("forcerange", "-320 320")
         elif name.startswith("gripper"):
-            position.set("kp", "220")
+            position.set("kp", "300")
             position.set("kv", "12")
             position.set("forcerange", "-80 80")
 

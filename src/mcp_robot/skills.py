@@ -1406,10 +1406,75 @@ def _plan_collection_pick_place_item(
     object_half_height: float,
     placement_surface_z: float,
     fps: int,
-    preview_sequence: bool = True,
+    preview_sequence: bool = False,
 ) -> tuple[Any, dict[str, Any]]:
     previous = sequence_items[-1].planned_trajectory if sequence_items else None
     place_specs = place_xy_candidates or [(-1, place_xy)]
+    if len(place_specs) == 1 and not preview_sequence:
+        place_slot_index, candidate_place_xy = place_specs[0]
+        seed_q = previous.poses.q_retreat if previous is not None else None
+        candidates: list[dict[str, Any]] = []
+        yaw_order = (0.0, np.pi, 0.5 * np.pi, -0.5 * np.pi)
+        for candidate_index, yaw in enumerate(yaw_order):
+            try:
+                planned = plan_pick_place_trajectory(
+                    target_surface_world,
+                    candidate_place_xy,
+                    object_half_height=object_half_height,
+                    placement_surface_z=placement_surface_z,
+                    source_model=model_path,
+                    grasp_yaw=float(yaw),
+                    seed_q=seed_q,
+                )
+            except Exception as exc:
+                candidates.append(
+                    {
+                        "index": candidate_index,
+                        "place_slot_index": int(place_slot_index),
+                        "place_xy_m": [round(float(value), 6) for value in candidate_place_xy],
+                        "grasp_yaw_rad": round(float(yaw), 6),
+                        "seed": "previous_retreat" if previous is not None else "default",
+                        "placed_in_preview": None,
+                        "reject_reason": str(exc),
+                    }
+                )
+                continue
+
+            if previous is None:
+                bridge_delta = np.zeros(6, dtype=float)
+                joint_norm = 0.0
+                min_place_spacing = 0.20
+            else:
+                bridge_waypoints = sequence_bridge_waypoints(previous.poses.q_retreat, previous, planned)
+                bridge_delta = bridge_waypoints[-1] - bridge_waypoints[0]
+                joint_norm = float(np.linalg.norm(bridge_delta))
+                min_place_spacing = min(
+                    float(np.linalg.norm(planned.place_center[:2] - item.planned_trajectory.place_center[:2]))
+                    for item in sequence_items
+                )
+            selected = {
+                "index": candidate_index,
+                "place_slot_index": int(place_slot_index),
+                "place_xy_m": [round(float(value), 6) for value in candidate_place_xy],
+                "min_place_spacing_m": round(float(min_place_spacing), 6),
+                "grasp_yaw_rad": round(float(yaw), 6),
+                "seed": "previous_retreat" if previous is not None else "default",
+                "placed_in_preview": None,
+                "bridge_delta_deg": [round(float(value), 3) for value in np.rad2deg(bridge_delta)],
+                "bridge_joint_norm_rad": round(joint_norm, 6),
+                "playback_duration_s": round(float(planned.total_playback_duration), 3),
+            }
+            candidates.append(selected)
+            return planned, {
+                "mode": "sequential_slot_direct_first_feasible_no_preview",
+                "selected": selected,
+                "candidates": candidates,
+            }
+        raise RuntimeError(
+            f"No feasible direct yaw branch for {object_name} at tray slot {place_slot_index}: "
+            + "; ".join(str(candidate.get("reject_reason", "")) for candidate in candidates)
+        )
+
     candidate_specs: list[tuple[float, str, np.ndarray | None]] = []
     for yaw in PICK_PLACE_CANDIDATE_YAWS:
         candidate_specs.append((float(yaw), "default", None))
