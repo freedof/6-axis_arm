@@ -159,6 +159,7 @@ def plan_pick_place_trajectory(
     object_half_height: float,
     placement_surface_z: float = TABLE_TOP_Z,
     source_model: Path = DEFAULT_MULTI_OBJECT_MODEL,
+    planning_model_path: Path | None = None,
     shortcut: bool = True,
     grasp_yaw: float = 0.0,
     seed_q: np.ndarray | None = None,
@@ -203,7 +204,8 @@ def plan_pick_place_trajectory(
 
     robot = dobot_cr5_simplified()
     source_model = write_multi_object_scene_model(source_model) if source_model == DEFAULT_MULTI_OBJECT_MODEL else Path(source_model)
-    planning_model = write_planning_model(DEFAULT_PICK_PLANNING_MODEL, source_model=source_model)
+    planning_model_output = DEFAULT_PICK_PLANNING_MODEL if planning_model_path is None else Path(planning_model_path)
+    planning_model = write_planning_model(planning_model_output, source_model=source_model)
     checker = MujocoCollisionChecker(planning_model, robot)
     singularity = SingularityChecker(robot)
 

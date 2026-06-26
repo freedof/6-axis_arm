@@ -230,6 +230,21 @@ def _run_command(
                 }
             )
 
+    source_model_path = Path(model.xml_path) if getattr(model, "xml_path", None) else DEFAULT_D435I_MULTI_OBJECT_MODEL
+    if bool(command.get("parallel_fixed_seed_planning", False)) and len(localized_targets) > 1:
+        planned_items, _branch_selections = _plan_parallel_fixed_seed_items(
+            localized_targets,
+            source_model_path=source_model_path,
+            destination=destination,
+            command=command,
+            output_dir=output_dir,
+            fps=fps,
+        )
+        for item in planned_items:
+            _play_pick_place_item(model, data, viewer, sequence_items, item, fps=fps, trace_records=trace_records, trace_path=trace_path)
+            sequence_items.append(item)
+        return
+
     for target in localized_targets:
         index = int(target["index"])
         object_name = str(target["object_name"])
@@ -237,7 +252,7 @@ def _run_command(
         target_surface_world = np.asarray(located["perception"]["fusion"]["fused_target_surface_world_m"], dtype=float)
         object_half_height = float(located["object_half_height_m"])
         planned, _branch_selection = skills._plan_collection_pick_place_item(
-            Path(model.xml_path) if getattr(model, "xml_path", None) else DEFAULT_D435I_MULTI_OBJECT_MODEL,
+            source_model_path,
             sequence_items,
             object_name=object_name,
             target_surface_world=target_surface_world,
@@ -254,6 +269,77 @@ def _run_command(
         item = PickPlaceSequenceItem(object_name=object_name, planned_trajectory=planned)
         _play_pick_place_item(model, data, viewer, sequence_items, item, fps=fps, trace_records=trace_records, trace_path=trace_path)
         sequence_items.append(item)
+
+
+def _plan_parallel_fixed_seed_items(
+    localized_targets: list[dict[str, Any]],
+    *,
+    source_model_path: Path,
+    destination: dict[str, Any],
+    command: dict[str, Any],
+    output_dir: Path,
+    fps: int,
+) -> tuple[list[PickPlaceSequenceItem], list[dict[str, Any]]]:
+    fixed_seed_pose = str(command.get("fixed_seed_pose") or _first_photo_pose(command))
+    fixed_seed_q = _trajectory_pose(solve_pick_trajectory(), fixed_seed_pose)
+    workers = max(1, min(int(command.get("max_parallel_planning", len(localized_targets))), len(localized_targets)))
+    planning_dir = output_dir / "parallel_fixed_seed_planning"
+    planning_dir.mkdir(parents=True, exist_ok=True)
+
+    def plan_one(target: dict[str, Any]) -> tuple[int, PickPlaceSequenceItem, dict[str, Any]]:
+        index = int(target["index"])
+        object_name = str(target["object_name"])
+        located = target["located"]
+        target_surface_world = np.asarray(located["perception"]["fusion"]["fused_target_surface_world_m"], dtype=float)
+        object_half_height = float(located["object_half_height_m"])
+        place_xy = skills._destination_place_xy(destination, index)
+        planned, branch_selection = skills._plan_collection_pick_place_item(
+            source_model_path,
+            [],
+            object_name=object_name,
+            target_surface_world=target_surface_world,
+            place_xy=place_xy,
+            place_xy_candidates=[(index, place_xy)],
+            object_half_height=object_half_height,
+            placement_surface_z=skills._destination_surface_z(destination),
+            fps=fps,
+            preview_sequence=False,
+            fixed_seed_q=fixed_seed_q,
+            fixed_seed_name=f"fixed:{fixed_seed_pose}",
+            planning_model_path=planning_dir / f"{index:02d}_{object_name}_planning.xml",
+        )
+        item = PickPlaceSequenceItem(object_name=object_name, planned_trajectory=planned)
+        return index, item, branch_selection
+
+    results: list[tuple[int, PickPlaceSequenceItem, dict[str, Any]]] = []
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = [executor.submit(plan_one, target) for target in localized_targets]
+        for future in as_completed(futures):
+            results.append(future.result())
+
+    results.sort(key=lambda item: item[0])
+    planned_items = [item for _, item, _ in results]
+    branch_selections = [selection for _, _, selection in results]
+    _write_json_atomic(
+        planning_dir / "summary.json",
+        {
+            "mode": "parallel_fixed_seed_planning",
+            "fixed_seed_pose": fixed_seed_pose,
+            "workers": workers,
+            "items": [
+                {
+                    "index": index,
+                    "object_name": item.object_name,
+                    "place_center_m": [round(float(value), 6) for value in item.planned_trajectory.place_center],
+                    "total_playback_duration_s": round(float(item.planned_trajectory.total_playback_duration), 3),
+                    "transfer_reason": item.planned_trajectory.lift_to_place_above.reason,
+                    "branch_selection": branch,
+                }
+                for (index, item, branch) in results
+            ],
+        },
+    )
+    return planned_items, branch_selections
 
 
 def _play_scan_motion(model: mujoco.MjModel, data: mujoco.MjData, viewer, *, poses: tuple[str, ...], fps: int) -> None:
@@ -719,10 +805,7 @@ def _record_waypoint(
 
 
 def _write_waypoint_trace(trace_path: Path, records: list[dict[str, Any]]) -> None:
-    trace_path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = trace_path.with_name(f"{trace_path.name}.{os.getpid()}.tmp")
-    tmp_path.write_text(json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8")
-    os.replace(tmp_path, trace_path)
+    _write_json_atomic(trace_path, records)
 
 
 def _write_robot_state(
@@ -758,10 +841,7 @@ def _write_robot_state(
         "tcp_world_m": tcp_pos,
         "objects_world_m": objects,
     }
-    state_path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = state_path.with_name(f"{state_path.name}.{os.getpid()}.tmp")
-    tmp_path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
-    os.replace(tmp_path, state_path)
+    _write_json_atomic(state_path, state)
 
 
 def _read_command(command_path: Path) -> dict[str, Any] | None:
@@ -791,8 +871,14 @@ def _remove_command_file(command_path: Path) -> bool:
 
 def _write_status(status_path: Path, status: dict[str, Any]) -> None:
     status["updated_at"] = time.time()
-    with status_path.open("w", encoding="utf-8") as handle:
-        json.dump(status, handle, ensure_ascii=False, indent=2)
+    _write_json_atomic(status_path, status)
+
+
+def _write_json_atomic(path: Path, payload: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(tmp_path, path)
 
 
 def _absolute(path: Path) -> Path:

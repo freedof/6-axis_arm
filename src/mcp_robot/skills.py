@@ -1407,12 +1407,20 @@ def _plan_collection_pick_place_item(
     placement_surface_z: float,
     fps: int,
     preview_sequence: bool = False,
+    fixed_seed_q: np.ndarray | None = None,
+    fixed_seed_name: str | None = None,
+    planning_model_path: Path | None = None,
 ) -> tuple[Any, dict[str, Any]]:
     previous = sequence_items[-1].planned_trajectory if sequence_items else None
     place_specs = place_xy_candidates or [(-1, place_xy)]
     if len(place_specs) == 1 and not preview_sequence:
         place_slot_index, candidate_place_xy = place_specs[0]
-        seed_q = previous.poses.q_retreat if previous is not None else None
+        if fixed_seed_q is not None:
+            seed_q = np.asarray(fixed_seed_q, dtype=float)
+            seed_label = str(fixed_seed_name or "fixed_seed")
+        else:
+            seed_q = previous.poses.q_retreat if previous is not None else None
+            seed_label = "previous_retreat" if previous is not None else "default"
         candidates: list[dict[str, Any]] = []
         yaw_order = (0.0, np.pi, 0.5 * np.pi, -0.5 * np.pi)
         for candidate_index, yaw in enumerate(yaw_order):
@@ -1423,6 +1431,7 @@ def _plan_collection_pick_place_item(
                     object_half_height=object_half_height,
                     placement_surface_z=placement_surface_z,
                     source_model=model_path,
+                    planning_model_path=planning_model_path,
                     grasp_yaw=float(yaw),
                     seed_q=seed_q,
                 )
@@ -1433,7 +1442,7 @@ def _plan_collection_pick_place_item(
                         "place_slot_index": int(place_slot_index),
                         "place_xy_m": [round(float(value), 6) for value in candidate_place_xy],
                         "grasp_yaw_rad": round(float(yaw), 6),
-                        "seed": "previous_retreat" if previous is not None else "default",
+                        "seed": seed_label,
                         "placed_in_preview": None,
                         "reject_reason": str(exc),
                     }
@@ -1458,7 +1467,7 @@ def _plan_collection_pick_place_item(
                 "place_xy_m": [round(float(value), 6) for value in candidate_place_xy],
                 "min_place_spacing_m": round(float(min_place_spacing), 6),
                 "grasp_yaw_rad": round(float(yaw), 6),
-                "seed": "previous_retreat" if previous is not None else "default",
+                "seed": seed_label,
                 "placed_in_preview": None,
                 "bridge_delta_deg": [round(float(value), 3) for value in np.rad2deg(bridge_delta)],
                 "bridge_joint_norm_rad": round(joint_norm, 6),
