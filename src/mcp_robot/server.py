@@ -39,6 +39,7 @@ class RobotMcpServer:
             "get_robot_capabilities": lambda args: skills.get_robot_capabilities(),
             "list_available_scenes": lambda args: skills.list_available_scenes(),
             "get_scene_state": self._get_scene_state,
+            "get_live_robot_state": self._get_live_robot_state,
             "generate_gripper_model": lambda args: skills.generate_gripper_model(),
             "generate_pick_scene": lambda args: skills.generate_pick_scene(),
             "generate_multi_object_scene": self._generate_multi_object_scene,
@@ -128,6 +129,9 @@ class RobotMcpServer:
     def _get_scene_state(self, args: dict[str, Any]) -> dict[str, Any]:
         return skills.get_scene_state(args.get("scene_id", "gripper_pick_cube"))
 
+    def _get_live_robot_state(self, args: dict[str, Any]) -> dict[str, Any]:
+        return skills.get_live_robot_state(args.get("output_dir"))
+
     def _simulate_pick_cube(self, args: dict[str, Any]) -> dict[str, Any]:
         return skills.simulate_pick_cube(
             frames=int(args.get("frames", 120)),
@@ -187,6 +191,8 @@ class RobotMcpServer:
             depth_path=args["depth_path"],
             intrinsics=args["intrinsics"],
             extrinsic_world_to_camera=args["extrinsic_world_to_camera"],
+            bbox_expansion=float(args.get("bbox_expansion", 1.25)),
+            min_world_z_m=args.get("min_world_z_m"),
         )
 
     def _vl_locate_object_3d(self, args: dict[str, Any]) -> dict[str, Any]:
@@ -283,6 +289,7 @@ class RobotMcpServer:
             max_parallel_vl=int(args.get("max_parallel_vl", 4)),
             min_accepted_views=int(args.get("min_accepted_views", 1)),
             depth_variant=str(args.get("depth_variant", "raw")),
+            language_goal=args.get("language_goal"),
         )
 
     def _language_multi_view_pick_and_place(self, args: dict[str, Any]) -> dict[str, Any]:
@@ -306,7 +313,9 @@ class RobotMcpServer:
             width=int(args.get("width", 960)),
             height=int(args.get("height", 720)),
             show_sites=bool(args.get("show_sites", False)),
+            show_viewer=bool(args.get("show_viewer", False)),
             depth_variant=str(args.get("depth_variant", "raw")),
+            language_goal=args.get("language_goal"),
         )
     def _multi_view_vl_pick_cube(self, args: dict[str, Any]) -> dict[str, Any]:
         return skills.multi_view_vl_pick_cube(
@@ -353,6 +362,18 @@ class RobotMcpServer:
                             "type": "string",
                             "default": "gripper_pick_cube",
                             "enum": list(skills.SCENES.keys()),
+                        }
+                    }
+                ),
+            },
+            {
+                "name": "get_live_robot_state",
+                "description": "Return the latest live MuJoCo session status, robot qpos, and waypoint trace snapshot if a live session has written them.",
+                "inputSchema": _object_schema(
+                    {
+                        "output_dir": {
+                            "type": "string",
+                            "description": "Optional live session output directory. Defaults to outputs/live_session.",
                         }
                     }
                 ),
@@ -437,6 +458,8 @@ class RobotMcpServer:
                         "depth_path": {"type": "string"},
                         "intrinsics": {"type": "array"},
                         "extrinsic_world_to_camera": {"type": "array"},
+                        "bbox_expansion": {"type": "number", "default": 1.25, "minimum": 1.0},
+                        "min_world_z_m": {"type": "number"},
                     },
                     required=["region", "depth_path", "intrinsics", "extrinsic_world_to_camera"],
                 ),
@@ -622,6 +645,10 @@ def _language_multi_view_schema(*, include_render: bool) -> dict[str, Any]:
             "type": "object",
             "description": "Optional map from pose name to manual bbox/point region.",
         },
+        "language_goal": {
+            "type": "object",
+            "description": "Optional Codex-parsed goal. When provided, it bypasses the local rule parser and supplies target, destination, and vl_prompt.",
+        },
         "model": {"type": "string"},
         "config_path": {"type": "string"},
         "output_dir": {"type": "string"},
@@ -648,6 +675,7 @@ def _language_multi_view_schema(*, include_render: bool) -> dict[str, Any]:
             **properties,
             **_render_schema(default_frames=0, minimum_frames=0)["properties"],
             "render_gif": {"type": "boolean", "default": True},
+            "show_viewer": {"type": "boolean", "default": False, "description": "Open a blocking MuJoCo passive viewer to play the planned pick-and-place trajectory."},
         }
     return _object_schema(properties, required=["instruction"])
 

@@ -9,6 +9,22 @@ Use this skill for the `F:\6-axis arm` project when the user asks Codex to find 
 
 ## Workflow
 
+0. For live MuJoCo sessions, submit robot commands safely.
+   - Start or reuse the viewer with:
+     ```powershell
+     .venv\Scripts\python src\sim\launch_live_robot_session.py --provider openrouter_vision --model google/gemini-3.5-flash
+     ```
+   - Submit command JSON through the atomic helper:
+     ```powershell
+     .venv\Scripts\python src\sim\submit_live_robot_command.py --wait-consumed
+     ```
+     Pass the command JSON on stdin or with `--command-file`.
+   - Do not read or open `outputs/live_session/command.json` after submitting.
+     The live session deletes it after parsing; on Windows, another reader can
+     briefly lock the file and should not be allowed to crash the viewer.
+   - Monitor only `outputs/live_session/status.json`, `live_stdout.log`, and
+     `live_stderr.log`.
+
 1. Render or reuse a D435i observation.
    - Default command:
      ```powershell

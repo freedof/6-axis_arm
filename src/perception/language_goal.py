@@ -35,7 +35,7 @@ REGION_ALIASES: dict[str, tuple[str, ...]] = {
 
 TABLE_CENTER_XY_M = (0.35, -0.55)
 TABLE_REGION_OFFSET_M = 0.11
-TRAY_CENTER_XY_M = (0.55, -0.47)
+TRAY_CENTER_XY_M = (0.64, -0.37)
 QUANTIFIER_ALL_ALIASES = ("所有", "全部", "全部的", "all", "every")
 
 

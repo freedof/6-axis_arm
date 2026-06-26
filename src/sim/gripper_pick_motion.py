@@ -310,10 +310,25 @@ def _plan_segment(
     max_joint_velocity: float,
     max_joint_acceleration: float,
 ) -> PlannedPickSegment:
-    result = plan_joint_rrt_connect(robot, q_start, q_goal, state_valid, config=config)
-    if not result.success:
-        raise RuntimeError(f"RRT-Connect failed for {name}: {result.reason}")
-    path = result.path
+    direct_path = (np.asarray(q_start, dtype=float), np.asarray(q_goal, dtype=float))
+    if state_valid(direct_path[0]) and state_valid(direct_path[1]) and _edge_valid(
+        direct_path[0],
+        direct_path[1],
+        state_valid,
+        config.edge_resolution,
+    ):
+        raw_path = direct_path
+        path = direct_path
+        iterations = 0
+        reason = "direct_edge_valid"
+    else:
+        result = plan_joint_rrt_connect(robot, q_start, q_goal, state_valid, config=config)
+        if not result.success:
+            raise RuntimeError(f"RRT-Connect failed for {name}: {result.reason}")
+        raw_path = result.path
+        path = result.path
+        iterations = result.iterations
+        reason = result.reason
     if shortcut:
         path = shortcut_path(path, state_valid, attempts=80, edge_resolution=config.edge_resolution, rng_seed=41)
     trajectory = parameterize_joint_path(
@@ -323,12 +338,23 @@ def _plan_segment(
     )
     return PlannedPickSegment(
         name=name,
-        raw_path=result.path,
+        raw_path=raw_path,
         path=path,
         trajectory=trajectory,
-        iterations=result.iterations,
-        reason=result.reason,
+        iterations=iterations,
+        reason=reason,
     )
+
+
+def _edge_valid(q_start: np.ndarray, q_goal: np.ndarray, state_valid, edge_resolution: float) -> bool:
+    distance = float(np.linalg.norm(q_goal - q_start))
+    steps = max(1, int(np.ceil(distance / max(float(edge_resolution), 1e-6))))
+    for step in range(1, steps):
+        alpha = step / steps
+        q = (1.0 - alpha) * q_start + alpha * q_goal
+        if not state_valid(q):
+            return False
+    return True
 
 
 def _solve_gripper_center_pose(

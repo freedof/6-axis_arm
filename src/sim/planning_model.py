@@ -9,6 +9,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from src.sim.demo_xyz_joint_roundtrip import DEFAULT_MODEL
+from src.sim.gripper_pick_scene import TRAY_CENTER, TRAY_FLOOR_TOP_Z, TRAY_HALF_SIZE
 
 
 DEFAULT_PLANNING_MODEL = ROOT / "assets" / "dobot_cr5" / "mjcf" / "cr5_planning.xml"
@@ -94,6 +95,7 @@ def write_planning_model(
 
     _disable_visual_geoms(root)
     _replace_floor_with_collision_floor(world)
+    _add_tray_keepout_if_present(world)
     _add_robot_collision_geoms(world)
 
     output_path = Path(output_path)
@@ -159,6 +161,28 @@ def _add_robot_collision_geoms(world: ET.Element) -> None:
                 "group": "2",
             }
             ET.SubElement(body, "geom", attrs)
+
+
+def _add_tray_keepout_if_present(world: ET.Element) -> None:
+    if world.find("geom[@name='tabletop_tray_floor']") is None:
+        return
+    if world.find("geom[@name='planning_obstacle_tray_keepout']") is not None:
+        return
+    keepout_height = 0.060
+    ET.SubElement(
+        world,
+        "geom",
+        {
+            "name": "planning_obstacle_tray_keepout",
+            "type": "box",
+            "pos": f"{TRAY_CENTER[0]:g} {TRAY_CENTER[1]:g} {TRAY_FLOOR_TOP_Z + keepout_height / 2.0:g}",
+            "size": f"{TRAY_HALF_SIZE[0]:g} {TRAY_HALF_SIZE[1]:g} {keepout_height / 2.0:g}",
+            "rgba": "0.95 0.20 0.10 0.18",
+            "contype": "1",
+            "conaffinity": "1",
+            "group": "2",
+        },
+    )
 
 
 def _is_planning_collision_geom(name: str) -> bool:

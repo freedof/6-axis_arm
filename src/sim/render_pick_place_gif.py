@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import argparse
+import time
 from pathlib import Path
 import sys
 
 import mujoco
+import mujoco.viewer
 import numpy as np
 from PIL import Image
 
@@ -15,7 +17,7 @@ if str(ROOT) not in sys.path:
 from src.sim.gripper_model import GRIPPER_OPEN_QPOS
 from src.sim.gripper_pick_motion import GRIPPER_DOF, ROBOT_DOF
 from src.sim.gripper_pick_scene import DEFAULT_MULTI_OBJECT_MODEL, write_multi_object_scene_model
-from src.sim.pick_place_motion import PlannedPickPlaceTrajectory, PickPlaceSequenceItem, pick_place_command_at_time, pick_place_required_frames, pick_place_sequence_required_frames
+from src.sim.pick_place_motion import PlannedPickPlaceTrajectory, PickPlaceSequenceItem, SEQUENCE_BRIDGE_SECONDS, pick_place_command_at_time, pick_place_required_frames, pick_place_sequence_required_frames, sequence_bridge_command_at_time, sequence_bridge_waypoints
 
 
 DEFAULT_OUTPUT = ROOT / "outputs" / "pick_place" / "multi_object_pick_place.gif"
@@ -88,7 +90,7 @@ def render_pick_place_sequence_gif(
     frames: int = 0,
     fps: int = 20,
     show_sites: bool = False,
-    bridge_seconds: float = 2.4,
+    bridge_seconds: float = SEQUENCE_BRIDGE_SECONDS,
 ) -> None:
     sequence = tuple(items)
     if not sequence:
@@ -119,14 +121,15 @@ def render_pick_place_sequence_gif(
     for index, item in enumerate(sequence):
         if index > 0:
             bridge_frames = int(np.ceil(max(0.0, bridge_seconds) * fps))
-            q_start = data.qpos[:ROBOT_DOF].copy()
-            q_end = item.planned_trajectory.poses.q_ready
-            total_bridge_steps = max(1, bridge_frames * steps_per_frame)
+            waypoints = sequence_bridge_waypoints(
+                data.qpos[:ROBOT_DOF].copy(),
+                sequence[index - 1].planned_trajectory,
+                item.planned_trajectory,
+            )
             for frame_index in range(bridge_frames):
                 for step_index in range(steps_per_frame):
                     step = frame_index * steps_per_frame + step_index + 1
-                    alpha = _smoothstep(step / total_bridge_steps)
-                    q_des = (1.0 - alpha) * q_start + alpha * q_end
+                    q_des = sequence_bridge_command_at_time(waypoints, step * model.opt.timestep, bridge_seconds)
                     data.ctrl[:ROBOT_DOF] = q_des
                     data.ctrl[ROBOT_DOF : ROBOT_DOF + GRIPPER_DOF] = GRIPPER_OPEN_QPOS
                     mujoco.mj_step(model, data)
@@ -156,6 +159,119 @@ def render_pick_place_sequence_gif(
     _save_gif(images, output_path, fps)
     print(f"gif: {output_path}")
 
+
+
+def play_pick_place_viewer(
+    model_path: Path,
+    *,
+    planned_trajectory: PlannedPickPlaceTrajectory,
+    frames: int = 0,
+    fps: int = 20,
+) -> None:
+    model = mujoco.MjModel.from_xml_path(str(model_path))
+    data = mujoco.MjData(model)
+    data.qpos[:] = model.qpos0.copy()
+    data.qpos[:ROBOT_DOF] = planned_trajectory.poses.q_ready
+    data.qpos[ROBOT_DOF : ROBOT_DOF + GRIPPER_DOF] = GRIPPER_OPEN_QPOS
+    data.ctrl[:] = 0.0
+    data.ctrl[:ROBOT_DOF] = planned_trajectory.poses.q_ready
+    data.ctrl[ROBOT_DOF : ROBOT_DOF + GRIPPER_DOF] = GRIPPER_OPEN_QPOS
+    mujoco.mj_forward(model, data)
+
+    total_frames = pick_place_required_frames(planned_trajectory, frames=frames, fps=fps)
+    steps_per_frame = max(1, int(round(1.0 / (fps * model.opt.timestep))))
+    with mujoco.viewer.launch_passive(model, data) as viewer:
+        start = time.time()
+        for frame_index in range(total_frames):
+            if not viewer.is_running():
+                break
+            for step_index in range(steps_per_frame):
+                sim_time = (frame_index * steps_per_frame + step_index) * model.opt.timestep
+                q_des, gripper_des = pick_place_command_at_time(planned_trajectory, sim_time)
+                data.ctrl[:ROBOT_DOF] = q_des
+                data.ctrl[ROBOT_DOF : ROBOT_DOF + GRIPPER_DOF] = gripper_des
+                mujoco.mj_step(model, data)
+            viewer.sync()
+            target_time = start + (frame_index + 1) / max(float(fps), 1.0)
+            time.sleep(max(0.0, target_time - time.time()))
+
+def play_pick_place_sequence_viewer(
+    model_path: Path,
+    *,
+    items: tuple[PickPlaceSequenceItem, ...] | list[PickPlaceSequenceItem],
+    frames: int = 0,
+    fps: int = 20,
+    bridge_seconds: float = SEQUENCE_BRIDGE_SECONDS,
+) -> None:
+    sequence = tuple(items)
+    if not sequence:
+        raise ValueError("items must contain at least one pick-and-place task.")
+
+    model = mujoco.MjModel.from_xml_path(str(model_path))
+    data = mujoco.MjData(model)
+    data.qpos[:] = model.qpos0.copy()
+    data.qpos[:ROBOT_DOF] = sequence[0].planned_trajectory.poses.q_ready
+    data.qpos[ROBOT_DOF : ROBOT_DOF + GRIPPER_DOF] = GRIPPER_OPEN_QPOS
+    data.ctrl[:] = 0.0
+    data.ctrl[:ROBOT_DOF] = sequence[0].planned_trajectory.poses.q_ready
+    data.ctrl[ROBOT_DOF : ROBOT_DOF + GRIPPER_DOF] = GRIPPER_OPEN_QPOS
+    mujoco.mj_forward(model, data)
+
+    steps_per_frame = max(1, int(round(1.0 / (fps * model.opt.timestep))))
+    total_frames = pick_place_sequence_required_frames(sequence, frames=frames, fps=fps, bridge_seconds=bridge_seconds)
+    frame_count = 0
+    start = time.time()
+    with mujoco.viewer.launch_passive(model, data) as viewer:
+        for index, item in enumerate(sequence):
+            if not viewer.is_running():
+                break
+            if index > 0:
+                bridge_frames = int(np.ceil(max(0.0, bridge_seconds) * fps))
+                waypoints = sequence_bridge_waypoints(
+                    data.qpos[:ROBOT_DOF].copy(),
+                    sequence[index - 1].planned_trajectory,
+                    item.planned_trajectory,
+                )
+                for frame_index in range(bridge_frames):
+                    if not viewer.is_running():
+                        break
+                    for step_index in range(steps_per_frame):
+                        step = frame_index * steps_per_frame + step_index + 1
+                        q_des = sequence_bridge_command_at_time(waypoints, step * model.opt.timestep, bridge_seconds)
+                        data.ctrl[:ROBOT_DOF] = q_des
+                        data.ctrl[ROBOT_DOF : ROBOT_DOF + GRIPPER_DOF] = GRIPPER_OPEN_QPOS
+                        mujoco.mj_step(model, data)
+                    viewer.sync()
+                    frame_count += 1
+                    _sleep_to_frame(start, frame_count, fps)
+
+            task_frames = pick_place_required_frames(item.planned_trajectory, frames=0, fps=fps)
+            for frame_index in range(task_frames):
+                if not viewer.is_running():
+                    break
+                for step_index in range(steps_per_frame):
+                    sim_time = (frame_index * steps_per_frame + step_index) * model.opt.timestep
+                    q_des, gripper_des = pick_place_command_at_time(item.planned_trajectory, sim_time)
+                    data.ctrl[:ROBOT_DOF] = q_des
+                    data.ctrl[ROBOT_DOF : ROBOT_DOF + GRIPPER_DOF] = gripper_des
+                    mujoco.mj_step(model, data)
+                viewer.sync()
+                frame_count += 1
+                _sleep_to_frame(start, frame_count, fps)
+
+        while viewer.is_running() and frame_count < total_frames:
+            data.ctrl[:ROBOT_DOF] = sequence[-1].planned_trajectory.poses.q_retreat
+            data.ctrl[ROBOT_DOF : ROBOT_DOF + GRIPPER_DOF] = GRIPPER_OPEN_QPOS
+            for _ in range(steps_per_frame):
+                mujoco.mj_step(model, data)
+            viewer.sync()
+            frame_count += 1
+            _sleep_to_frame(start, frame_count, fps)
+
+
+def _sleep_to_frame(start: float, frame_count: int, fps: int) -> None:
+    target_time = start + frame_count / max(float(fps), 1.0)
+    time.sleep(max(0.0, target_time - time.time()))
 
 def _smoothstep(value: float) -> float:
     x = float(np.clip(value, 0.0, 1.0))

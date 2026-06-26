@@ -17,21 +17,21 @@ DEFAULT_PICK_MODEL = ROOT / "assets" / "dobot_cr5" / "mjcf" / "cr5_gripper_pick_
 DEFAULT_MULTI_OBJECT_MODEL = ROOT / "assets" / "dobot_cr5" / "mjcf" / "cr5_gripper_multi_object_scene.xml"
 TABLE_TOP_Z = 0.035
 TABLE_CENTER = (0.35, -0.55)
-TABLE_HALF_SIZE = (0.34, 0.28, 0.0175)
+TABLE_HALF_SIZE = (0.58, 0.40, 0.0175)
 CUBE_HALF_SIZE = (0.016, 0.018, 0.030)
 CUBE_CENTER = (0.35, -0.55, TABLE_TOP_Z + CUBE_HALF_SIZE[2])
 DEFAULT_OBJECT_MASS = 0.020
 DEFAULT_OBJECT_FRICTION = (3.0, 0.08, 0.006)
-TRAY_CENTER = (0.55, -0.47)
-TRAY_HALF_SIZE = (0.115, 0.075, 0.006)
+TRAY_CENTER = (0.64, -0.37)
+TRAY_HALF_SIZE = (0.180, 0.140, 0.006)
 TRAY_WALL_THICKNESS = 0.006
 TRAY_WALL_HEIGHT = 0.026
 TRAY_FLOOR_TOP_Z = TABLE_TOP_Z + TRAY_HALF_SIZE[2] * 2.0
 TRAY_PLACE_SLOTS = (
-    (0.49, -0.43),
-    (0.61, -0.51),
-    (0.49, -0.51),
-    (0.61, -0.43),
+    (0.555, -0.295),
+    (0.715, -0.435),
+    (0.555, -0.445),
+    (0.725, -0.295),
 )
 
 
@@ -56,11 +56,11 @@ class TableObjectSpec:
 
 
 DEFAULT_MULTI_OBJECT_SPECS = (
-    TableObjectSpec("red_cube", "box", "red", (0.88, 0.16, 0.10, 1.0), (0.35, -0.55), (0.016, 0.018, 0.030)),
-    TableObjectSpec("blue_cube", "box", "blue", (0.12, 0.32, 0.86, 1.0), (0.26, -0.51), (0.017, 0.017, 0.026)),
+    TableObjectSpec("red_cube", "box", "red", (0.88, 0.16, 0.10, 1.0), (0.33, -0.57), (0.016, 0.018, 0.030)),
+    TableObjectSpec("blue_cube", "box", "blue", (0.12, 0.32, 0.86, 1.0), (0.24, -0.53), (0.017, 0.017, 0.026)),
     TableObjectSpec("green_cylinder", "cylinder", "green", (0.12, 0.64, 0.28, 1.0), (0.39, -0.46), (0.018, 0.028)),
     TableObjectSpec("yellow_cylinder", "cylinder", "yellow", (0.95, 0.74, 0.12, 1.0), (0.29, -0.64), (0.016, 0.024)),
-    TableObjectSpec("purple_cube", "box", "purple", (0.54, 0.22, 0.80, 1.0), (0.45, -0.63), (0.015, 0.019, 0.025)),
+    TableObjectSpec("purple_cube", "box", "purple", (0.54, 0.22, 0.80, 1.0), (0.43, -0.59), (0.015, 0.019, 0.025)),
 )
 
 

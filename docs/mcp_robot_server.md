@@ -155,8 +155,7 @@ outputs/pick_place/multi_object_vl_pick_place/blue_cube_tray_pick_place.gif
 当前集合模式会将指令拆成多个单目标计划，但会在同一个 MuJoCo 仿真状态中连续执行，并生成一个连续 GIF，例如：
 
 ```text
-outputs/pick_place/collect_cylinders_to_tray/gifs/01_green_cylinder.gif
-outputs/pick_place/collect_cylinders_to_tray/gifs/02_yellow_cylinder.gif
+outputs/pick_place/collect_cylinders_to_tray/all_cylinders_continuous.gif
 ```
 该工具返回 `automatic_precheck_passed` 仍只表示自动预检通过，最终是否接受需要用户查看 GIF 后确认。
 ### simulate_pick_cube

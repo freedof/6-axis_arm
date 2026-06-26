@@ -191,6 +191,59 @@ region into a 3D world target.
 - Keep low-level robot logic in `src/robot`, `src/planning`, `src/perception`,
   and `src/sim`; keep high-level orchestration in `src/mcp_robot`.
 
+## Codex-Orchestrated VL Dispatch
+
+For user-facing manipulation requests, Codex should parse the task intent first,
+then call the virtual arm MCP tools with explicit structured arguments. Do not
+use the local `parse_language_goal` rule parser as the primary interpreter for
+Chinese or open-ended instructions; keep it as a compatibility fallback and
+smoke-test helper.
+
+When a request requires selecting or localizing an object from the D435i scene,
+Codex should mark the task as requiring VL grounding, choose a provider
+explicitly, and pass a Codex-parsed `language_goal` into `multi_object_vl_locate`
+or `language_multi_view_pick_and_place`. Use real VL providers such as
+`openrouter_vision`, `openai_vision`, or `ark_coding_vision` for model-based
+recognition; use `codex_vision` only for interactive Codex-in-the-loop bbox
+selection; use `color_fixture` only for deterministic local validation.
+
+For live demonstrations, use `src/sim/launch_live_robot_session.py` first. It
+reuses an existing waiting session when provider/model match, otherwise starts
+`src/sim/live_robot_session.py` as the long-running MuJoCo viewer process and
+waits until `outputs/live_session/status.json` reports `status: waiting`.
+
+Preferred OpenRouter startup:
+
+```powershell
+.venv\Scripts\python src\sim\launch_live_robot_session.py --provider openrouter_vision --model google/gemini-3.5-flash
+```
+
+The expected flow is:
+
+```text
+1. User: "启动机械臂并加载场景"
+   Codex starts the live session; MuJoCo shows the arm and multi-object scene,
+   static and waiting for a command.
+2. User: manipulation instruction
+   Codex parses the instruction into a structured JSON command and submits it
+   atomically with `src/sim/submit_live_robot_command.py`.
+3. The live session moves to scan poses, captures D435i views, runs VL/depth
+   localization, plans and executes the pick/place motion in the same viewer.
+4. After the task completes, the session waits 5 seconds and closes.
+```
+
+Live command safety rules:
+
+```text
+Use `src/sim/submit_live_robot_command.py` or an equivalent temp-file +
+atomic replace operation to create `outputs/live_session/command.json`.
+Never use PowerShell `Set-Content` directly on `command.json`.
+After submitting, do not read/open `command.json`; the live session deletes it
+after parsing, and Windows file locks can otherwise close the MuJoCo session.
+Monitor progress via `outputs/live_session/status.json`, `live_stdout.log`,
+and `live_stderr.log` only.
+```
+
 ## Validation Policy
 
 Validation has two layers:

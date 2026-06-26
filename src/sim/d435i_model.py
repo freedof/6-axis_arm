@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from pathlib import Path
 import sys
@@ -56,9 +56,10 @@ def _write_with_d435i(source_model: Path, output_path: Path, model_name: str) ->
 
     asset = root.find("asset")
     if asset is not None:
-        _ensure_material(asset, "d435i_body_mat", "0.07 0.075 0.08 1")
-        _ensure_material(asset, "d435i_face_mat", "0.015 0.018 0.022 1")
-        _ensure_material(asset, "d435i_lens_mat", "0.03 0.08 0.14 1")
+        _ensure_material(asset, "d435i_body_mat", "0.18 0.19 0.20 1")
+        _ensure_material(asset, "d435i_face_mat", "0.02 0.025 0.030 1")
+        _ensure_material(asset, "d435i_lens_mat", "0.02 0.18 0.32 1")
+        _ensure_material(asset, "d435i_accent_mat", "0.05 0.58 0.95 1")
 
     world = root.find("worldbody")
     if world is None:
@@ -101,6 +102,19 @@ def _d435i_body() -> ET.Element:
             "pos": "0 0 0.0135",
             "size": "0.043 0.010 0.0015",
             "material": "d435i_face_mat",
+            "contype": "0",
+            "conaffinity": "0",
+        },
+    )
+    ET.SubElement(
+        body,
+        "geom",
+        {
+            "name": "d435i_blue_accent",
+            "type": "box",
+            "pos": "0 0 0.0165",
+            "size": "0.038 0.0105 0.0012",
+            "material": "d435i_accent_mat",
             "contype": "0",
             "conaffinity": "0",
         },

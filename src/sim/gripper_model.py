@@ -86,6 +86,20 @@ def _parallel_gripper_body() -> ET.Element:
     )
     ET.SubElement(gripper, "site", {"name": "gripper_mount", "pos": "0 0 0", "size": "0.008", "rgba": "0.95 0.65 0.10 1"})
     ET.SubElement(gripper, "site", {"name": "gripper_tcp", "pos": "0 0 0.110", "size": "0.010", "rgba": "0.10 0.95 0.40 1"})
+    ET.SubElement(
+        gripper,
+        "geom",
+        {
+            "name": "collision_ee_envelope",
+            "type": "box",
+            "pos": "0 -0.018 0.065",
+            "size": "0.075 0.060 0.070",
+            "rgba": "0.10 0.95 0.35 0.16",
+            "contype": "0",
+            "conaffinity": "0",
+            "group": "2",
+        },
+    )
 
     gripper.append(
         _finger_body(

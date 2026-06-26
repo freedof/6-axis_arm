@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import json
 from pathlib import Path
+import subprocess
 import sys
 from typing import Any
 
@@ -14,12 +16,12 @@ if str(ROOT) not in sys.path:
 from src.perception.vl_region import estimate_region_3d as estimate_vl_region_3d
 from src.perception.vl_region import locate_ark_coding_vision_region
 from src.perception.vl_region import locate_codex_vision_region
-from src.perception.vl_region import locate_manual_region, locate_openai_vision_region, locate_openrouter_vision_region, locate_red_region_fixture
+from src.perception.vl_region import locate_manual_region, locate_openai_vision_region, locate_openrouter_vision_region, locate_openrouter_vision_regions, locate_red_region_fixture
 from src.perception.vl_region import region3d_to_dict
 from src.perception.language_goal import parse_language_goal as parse_language_goal_instruction
 from src.sim.gripper_model import DEFAULT_GRIPPER_MODEL, write_gripper_model
 from src.sim.gripper_pick_motion import plan_pick_trajectory_from_target_3d, simulate_pick
-from src.sim.pick_place_motion import PickPlaceSequenceItem, pick_place_required_frames, pick_place_segments, pick_place_sequence_required_frames, plan_pick_place_trajectory, simulate_pick_place, simulate_pick_place_sequence
+from src.sim.pick_place_motion import PICK_PLACE_CANDIDATE_YAWS, PickPlaceSequenceItem, SEQUENCE_BRIDGE_SECONDS, pick_place_required_frames, pick_place_segments, pick_place_sequence_required_frames, plan_pick_place_trajectory, sequence_bridge_waypoints, simulate_pick_place, simulate_pick_place_sequence
 from src.sim.gripper_pick_scene import CUBE_HALF_SIZE, DEFAULT_MULTI_OBJECT_MODEL, DEFAULT_MULTI_OBJECT_SPECS, DEFAULT_PICK_MODEL, TABLE_TOP_Z, TRAY_FLOOR_TOP_Z, TRAY_PLACE_SLOTS, object_specs_from_config, object_specs_to_dicts, tray_metadata, write_multi_object_scene_model, write_pick_scene_model
 from src.sim.d435i_model import DEFAULT_D435I_GRIPPER_MODEL, DEFAULT_D435I_MULTI_OBJECT_MODEL, DEFAULT_D435I_PICK_MODEL, write_d435i_multi_object_scene_model, write_d435i_pick_scene_model
 from src.sim.render_d435i_preview import DEFAULT_OUTPUT_DIR as DEFAULT_D435I_OUTPUT_DIR
@@ -27,7 +29,7 @@ from src.sim.render_d435i_preview import POSE_CHOICES
 from src.sim.render_d435i_preview import render_preview as render_d435i_camera_preview
 from src.sim.render_gripper_pick_gif import DEFAULT_OUTPUT as DEFAULT_PICK_GIF
 from src.sim.render_gripper_pick_gif import render_gif as render_pick_gif
-from src.sim.render_pick_place_gif import render_pick_place_gif, render_pick_place_sequence_gif
+from src.sim.render_pick_place_gif import play_pick_place_sequence_viewer, play_pick_place_viewer, render_pick_place_gif, render_pick_place_sequence_gif
 from src.sim.verify_render_gifs import validate_gif
 
 
@@ -114,8 +116,31 @@ def get_robot_capabilities() -> dict[str, Any]:
             "multi_view_vl_pick_cube",
             "multi_object_vl_locate",
             "language_multi_view_pick_and_place",
+            "get_live_robot_state",
         ],
         "validation_policy": "automatic pre-check passed; waiting for user GIF confirmation",
+    }
+
+
+def get_live_robot_state(output_dir: str | Path | None = None) -> dict[str, Any]:
+    session_dir = ROOT / "outputs" / "live_session" if output_dir is None else Path(output_dir)
+    if not session_dir.is_absolute():
+        session_dir = ROOT / session_dir
+    status = _read_json_file(session_dir / "status.json")
+    robot_state = _read_json_file(session_dir / "robot_state.json")
+    waypoint_trace = _read_json_file(session_dir / "waypoint_trace.json")
+    if not isinstance(waypoint_trace, list):
+        waypoint_trace = []
+    pid = int(status.get("pid") or 0) if isinstance(status, dict) else 0
+    return {
+        "status": status if isinstance(status, dict) else {},
+        "live_process_alive": _pid_is_alive(pid),
+        "robot_state": robot_state if isinstance(robot_state, dict) else {},
+        "latest_waypoint": waypoint_trace[-1] if waypoint_trace else None,
+        "waypoint_count": len(waypoint_trace),
+        "waypoint_labels": [str(item.get("label")) for item in waypoint_trace if isinstance(item, dict)],
+        "trace_path": _relative(session_dir / "waypoint_trace.json"),
+        "state_path": _relative(session_dir / "robot_state.json"),
     }
 
 
@@ -145,7 +170,7 @@ def get_scene_state(scene_id: str = "gripper_pick_cube") -> dict[str, Any]:
     elif scene_id == "gripper_pick_cube_d435i":
         model_path = write_d435i_pick_scene_model(DEFAULT_D435I_PICK_MODEL)
     elif scene_id == "gripper_multi_object":
-        model_path = write_multi_object_scene_model(DEFAULT_MULTI_OBJECT_MODEL)
+        model_path = write_d435i_multi_object_scene_model(DEFAULT_D435I_MULTI_OBJECT_MODEL)
     elif scene_id == "gripper_multi_object_d435i":
         model_path = write_d435i_multi_object_scene_model(DEFAULT_D435I_MULTI_OBJECT_MODEL)
     else:
@@ -247,6 +272,83 @@ def parse_language_goal(instruction: str, objects: list[dict[str, Any]] | None =
     parsed["scene_id"] = "gripper_multi_object_d435i"
     parsed["available_objects"] = scene_objects
     return parsed
+
+
+def _resolve_language_goal(
+    instruction: str,
+    language_goal: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    if language_goal is None:
+        return parse_language_goal(instruction)
+    if not isinstance(language_goal, dict):
+        raise ValueError("language_goal must be an object when provided.")
+
+    parsed = dict(language_goal)
+    parsed.setdefault("status", "ok")
+    parsed.setdefault("instruction", instruction)
+    parsed.setdefault("scene_id", "gripper_multi_object_d435i")
+    parsed.setdefault("available_objects", object_specs_to_dicts(DEFAULT_MULTI_OBJECT_SPECS))
+    parsed.setdefault("ambiguities", [])
+    parsed.setdefault("warnings", [])
+
+    target = parsed.get("target")
+    if not isinstance(target, dict):
+        raise ValueError("language_goal.target must be an object.")
+    target = dict(target)
+    object_names = list(target.get("object_names") or [])
+    object_name = target.get("object_name")
+    if object_name and object_name not in object_names:
+        object_names.insert(0, str(object_name))
+    if not object_name and len(object_names) == 1:
+        object_name = object_names[0]
+    if object_name:
+        target["object_name"] = str(object_name)
+    target["object_names"] = [str(name) for name in object_names]
+    target.setdefault("quantifier", "all" if len(object_names) > 1 else "one")
+
+    if object_name:
+        target_object = _object_by_name(str(object_name))
+        target.setdefault("color", target_object.get("color"))
+        target.setdefault("shape", target_object.get("shape"))
+    target.setdefault(
+        "constraints",
+        {
+            "color": target.get("color"),
+            "shape": target.get("shape"),
+        },
+    )
+    parsed["target"] = target
+    parsed.setdefault("matched_objects", [_candidate_from_object(_object_by_name(name)) for name in target["object_names"]])
+    if not parsed.get("vl_prompt"):
+        parsed["vl_prompt"] = _build_goal_vl_prompt(parsed)
+    return parsed
+
+
+def _candidate_from_object(item: dict[str, Any]) -> dict[str, Any]:
+    keys = ("name", "shape", "color", "initial_center_m", "position_xy_m")
+    return {key: item.get(key) for key in keys if item.get(key) is not None}
+
+
+def _build_goal_vl_prompt(parsed: dict[str, Any]) -> str:
+    target = parsed.get("target", {})
+    name = target.get("object_name")
+    color = target.get("color") or "specified"
+    shape = target.get("shape") or "object"
+    shape_text = "box/cube" if shape == "box" else str(shape)
+    bbox_guidance = (
+        "Return the full visible outer bbox of the physical object, including any gray-lit top face "
+        "attached to the colored side face. Do not return a tiny color patch, edge, shadow, table, tray, or gripper."
+    )
+    if name:
+        return (
+            f"Locate the {color} {shape_text} target named {name} on the tabletop. "
+            f"{bbox_guidance}"
+        )
+    return (
+        f"Locate one visible {color} {shape_text} target object on the tabletop. "
+        f"{bbox_guidance}"
+    )
+
 
 def generate_d435i_scene() -> dict[str, Any]:
     model_path = write_d435i_pick_scene_model(DEFAULT_D435I_PICK_MODEL)
@@ -433,6 +535,8 @@ def estimate_region_3d(
     depth_path: str | Path,
     intrinsics: list[list[float]],
     extrinsic_world_to_camera: list[list[float]],
+    bbox_expansion: float = 1.25,
+    min_world_z_m: float | None = None,
 ) -> dict[str, Any]:
     depth = Path(depth_path)
     if not depth.is_absolute():
@@ -442,6 +546,8 @@ def estimate_region_3d(
         intrinsics=intrinsics,
         extrinsic_world_to_camera=extrinsic_world_to_camera,
         region=region,
+        bbox_expansion=bbox_expansion,
+        min_world_z_m=min_world_z_m,
     )
     return {
         "status": "ok",
@@ -670,8 +776,9 @@ def multi_object_vl_locate(
     max_parallel_vl: int = 4,
     min_accepted_views: int = 1,
     depth_variant: str = "raw",
+    language_goal: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    parsed = parse_language_goal(instruction)
+    parsed = _resolve_language_goal(instruction, language_goal)
     if parsed["status"] != "ok":
         return {
             "status": "failed",
@@ -713,6 +820,230 @@ def multi_object_vl_locate(
     }
 
 
+def multi_target_vl_locate_once(
+    target_names: list[str] | tuple[str, ...],
+    output_dir: str | Path | None = None,
+    *,
+    provider: str = "openrouter_vision",
+    model: str | None = None,
+    config_path: str | Path | None = None,
+    camera_width: int = 424,
+    camera_height: int = 240,
+    seed: int = 7,
+    poses: list[str] | tuple[str, ...] = MULTI_VIEW_DEFAULT_POSES,
+    max_parallel_vl: int = 4,
+    min_accepted_views: int = 1,
+    depth_variant: str = "raw",
+) -> dict[str, Any]:
+    if provider != "openrouter_vision":
+        raise ValueError("multi_target_vl_locate_once currently supports provider='openrouter_vision'.")
+    depth_file_key = _depth_file_key(depth_variant)
+    selected_poses = tuple(str(pose) for pose in poses)
+    for pose in selected_poses:
+        if pose not in POSE_CHOICES:
+            raise ValueError(f"Unknown D435i pose for multi-target VL: {pose}")
+
+    output = _resolve_output_dir(output_dir, "multi_target_vl_region")
+    target_objects = [_object_by_name(str(name)) for name in target_names]
+    observations: dict[str, dict[str, Any]] = {}
+    for index, pose in enumerate(selected_poses):
+        view_dir = output / f"{index:02d}_{pose}"
+        observations[pose] = render_d435i_preview(
+            view_dir,
+            width=camera_width,
+            height=camera_height,
+            seed=seed + index,
+            pose=pose,
+            scene_id="gripper_multi_object_d435i",
+        )
+
+    regions_by_pose: dict[str, dict[str, dict[str, Any]]] = {}
+    workers = max(1, min(int(max_parallel_vl), len(selected_poses)))
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {
+            executor.submit(
+                locate_openrouter_vision_regions,
+                ROOT / observations[pose]["files"]["rgb"],
+                targets=target_objects,
+                output_path=output / f"{index:02d}_{pose}" / f"{pose}_multi_target_vl_overlay.png",
+                model=model,
+                config_path=config_path,
+            ): pose
+            for index, pose in enumerate(selected_poses)
+        }
+        for future in as_completed(futures):
+            pose = futures[future]
+            try:
+                regions_by_pose[pose] = future.result()
+            except Exception as exc:
+                regions_by_pose[pose] = {"__error__": {"error": str(exc)}}
+
+    return multi_target_vl_results_from_observations(
+        target_names,
+        observations=observations,
+        regions_by_pose=regions_by_pose,
+        provider=provider,
+        depth_variant=depth_variant,
+        poses=selected_poses,
+        min_accepted_views=min_accepted_views,
+    )
+
+
+def multi_target_vl_results_from_observations(
+    target_names: list[str] | tuple[str, ...],
+    *,
+    observations: dict[str, dict[str, Any]],
+    regions_by_pose: dict[str, dict[str, dict[str, Any]]],
+    provider: str,
+    depth_variant: str,
+    poses: list[str] | tuple[str, ...],
+    min_accepted_views: int = 1,
+) -> dict[str, Any]:
+    depth_file_key = _depth_file_key(depth_variant)
+    selected_poses = tuple(str(pose) for pose in poses)
+    target_objects = [_object_by_name(str(name)) for name in target_names]
+    results: dict[str, Any] = {}
+    required_accepted = max(int(min_accepted_views), 2)
+    for target_object in target_objects:
+        name = str(target_object["name"])
+        half_height = _object_half_height_m(target_object)
+        candidates: list[dict[str, Any]] = []
+        for pose in selected_poses:
+            observation = observations[pose]
+            pose_regions = regions_by_pose.get(pose, {})
+            if "__error__" in pose_regions:
+                candidates.append(
+                    {
+                        "pose": pose,
+                        "accepted": False,
+                        "reject_reason": f"vl_failed: {pose_regions['__error__']['error']}",
+                        "observation": observation,
+                    }
+                )
+                continue
+            region = pose_regions.get(name)
+            if region is None:
+                candidates.append(
+                    {
+                        "pose": pose,
+                        "accepted": False,
+                        "reject_reason": "target_missing_from_multi_target_vl_response",
+                        "observation": observation,
+                    }
+                )
+                continue
+            depth_path = Path(observation["files"][depth_file_key])
+            if not depth_path.is_absolute():
+                depth_path = ROOT / depth_path
+            try:
+                estimate3d = estimate_vl_region_3d(
+                    depth_path=depth_path,
+                    intrinsics=observation["intrinsics"],
+                    extrinsic_world_to_camera=observation["extrinsic_world_to_camera"],
+                    region=region,
+                    foreground_quantile=0.05,
+                    foreground_margin_m=0.010,
+                    bbox_expansion=1.25,
+                    min_world_z_m=TABLE_TOP_Z + 0.004,
+                )
+                candidates.append(
+                    {
+                        "pose": pose,
+                        "accepted": False,
+                        "reject_reason": "not_scored",
+                        "observation": observation,
+                        "depth_variant": depth_variant,
+                        "depth_file": _relative(depth_path),
+                        "region": region,
+                        "target_3d": region3d_to_dict(estimate3d),
+                    }
+                )
+            except Exception as exc:
+                candidates.append(
+                    {
+                        "pose": pose,
+                        "accepted": False,
+                        "reject_reason": f"depth_failed: {exc}",
+                        "observation": observation,
+                        "region": region,
+                    }
+                )
+
+        min_z = TABLE_TOP_Z + half_height + 0.004
+        max_z = TABLE_TOP_Z + half_height * 2.0 + 0.060
+        candidates = _score_multi_view_candidates(
+            candidates,
+            min_valid_pixels=25,
+            min_surface_z_m=min_z,
+            max_surface_z_m=max_z,
+            max_cluster_radius_m=0.040,
+        )
+        accepted = [candidate for candidate in candidates if candidate["accepted"]]
+        if len(accepted) >= required_accepted:
+            points = np.asarray([candidate["target_3d"]["center_world_m"] for candidate in accepted], dtype=float)
+            fused = np.median(points, axis=0)
+            mean_distance = float(np.mean(np.linalg.norm(points - fused, axis=1))) if len(points) else 0.0
+            confidence = float(np.clip(1.0 - mean_distance / 0.040, 0.05, 1.0))
+            status = "ok"
+            fusion = {
+                "fused_target_surface_world_m": _round_vector(fused),
+                "used_views": [candidate["pose"] for candidate in accepted],
+                "rejected_views": [candidate["pose"] for candidate in candidates if not candidate["accepted"]],
+                "accepted_count": len(accepted),
+                "rejected_count": len(candidates) - len(accepted),
+                "mean_distance_to_fused_m": round(mean_distance, 6),
+                "confidence": round(confidence, 4),
+                "rules": {
+                    "min_valid_pixels": 25,
+                    "min_surface_z_m": round(float(min_z), 6),
+                    "max_surface_z_m": round(float(max_z), 6),
+                    "max_cluster_radius_m": 0.040,
+                    "min_accepted_views": int(required_accepted),
+                },
+            }
+        else:
+            status = "failed"
+            fusion = {
+                "accepted_count": len(accepted),
+                "rejected_count": len(candidates) - len(accepted),
+                "used_views": [candidate["pose"] for candidate in accepted],
+                "rejected_views": [candidate["pose"] for candidate in candidates if not candidate["accepted"]],
+                "required_accepted_views": required_accepted,
+                "reason": "not enough accepted views for multi-target VL grounding",
+            }
+        perception = {
+            "status": status,
+            "scene_id": "gripper_multi_object_d435i",
+            "prompt": "Locate all requested cube targets in one pass.",
+            "provider": provider,
+            "depth_variant": depth_variant,
+            "poses": list(selected_poses),
+            "candidates": candidates,
+            "fusion": fusion,
+            "mode": "multi_target_one_request_per_view",
+        }
+        results[name] = {
+            "status": status,
+            "scene_id": "gripper_multi_object_d435i",
+            "skill": "multi_target_vl_locate_once",
+            "target_object": target_object,
+            "object_half_height_m": round(half_height, 6),
+            "perception": perception,
+        }
+
+    return {
+        "status": "ok" if all(item["status"] == "ok" for item in results.values()) else "failed",
+        "scene_id": "gripper_multi_object_d435i",
+        "skill": "multi_target_vl_locate_once",
+        "provider": provider,
+        "depth_variant": depth_variant,
+        "poses": list(selected_poses),
+        "target_names": [str(name) for name in target_names],
+        "observations": observations,
+        "results": results,
+    }
+
+
 def language_multi_view_pick_and_place(
     instruction: str,
     output_dir: str | Path | None = None,
@@ -734,10 +1065,12 @@ def language_multi_view_pick_and_place(
     width: int = 960,
     height: int = 720,
     show_sites: bool = False,
+    show_viewer: bool = False,
     depth_variant: str = "raw",
+    language_goal: dict[str, Any] | None = None,
     _place_slot_index: int = 0,
 ) -> dict[str, Any]:
-    pre_parsed = parse_language_goal(instruction)
+    pre_parsed = _resolve_language_goal(instruction, language_goal)
     if pre_parsed.get("status") == "ok" and pre_parsed.get("target", {}).get("quantifier") == "all":
         return _language_collection_pick_and_place(
             instruction,
@@ -760,6 +1093,7 @@ def language_multi_view_pick_and_place(
             width=width,
             height=height,
             show_sites=show_sites,
+            show_viewer=show_viewer,
             depth_variant=depth_variant,
         )
     located = multi_object_vl_locate(
@@ -776,6 +1110,7 @@ def language_multi_view_pick_and_place(
         max_parallel_vl=max_parallel_vl,
         min_accepted_views=min_accepted_views,
         depth_variant=depth_variant,
+        language_goal=pre_parsed,
     )
     parsed = located["language_goal"]
     if located["status"] != "ok":
@@ -803,7 +1138,7 @@ def language_multi_view_pick_and_place(
     target_surface_world = np.asarray(located["perception"]["fusion"]["fused_target_surface_world_m"], dtype=float)
     target_object = located["target_object"]
     object_half_height = float(located["object_half_height_m"])
-    model_path = write_multi_object_scene_model(DEFAULT_MULTI_OBJECT_MODEL)
+    model_path = write_d435i_multi_object_scene_model(DEFAULT_D435I_MULTI_OBJECT_MODEL)
     planned = plan_pick_place_trajectory(
         target_surface_world,
         _destination_place_xy(destination, _place_slot_index),
@@ -811,6 +1146,7 @@ def language_multi_view_pick_and_place(
         placement_surface_z=_destination_surface_z(destination),
         source_model=model_path,
     )
+    branch_selection = {"mode": "single_default", "selected": {"grasp_yaw_rad": 0.0, "seed": "default"}, "candidates": []}
     actual_frames = pick_place_required_frames(planned, frames=frames, fps=fps)
     result = simulate_pick_place(
         model_path,
@@ -835,6 +1171,7 @@ def language_multi_view_pick_and_place(
             "segments": [_planned_segment_summary(segment) for segment in pick_place_segments(planned)],
             "playback_duration_s": round(float(planned.total_playback_duration), 3),
         },
+        "ik_branch_selection": branch_selection,
         "metrics": _pick_place_metrics(result),
         "render": {
             "width": width,
@@ -845,6 +1182,11 @@ def language_multi_view_pick_and_place(
         },
         "user_acceptance": "pending",
     }
+    if show_viewer:
+        play_pick_place_viewer(model_path, planned_trajectory=planned, frames=actual_frames, fps=fps)
+        response["viewer"] = {"shown": True, "mode": "mujoco_passive", "blocking": True}
+    else:
+        response["viewer"] = {"shown": False}
     if render_gif:
         output = (ROOT / "outputs" / "pick_place" / "language_multi_view_pick_and_place.gif") if output_path is None else Path(output_path)
         if not output.is_absolute():
@@ -886,6 +1228,7 @@ def _language_collection_pick_and_place(
     width: int,
     height: int,
     show_sites: bool,
+    show_viewer: bool,
     depth_variant: str,
 ) -> dict[str, Any]:
     destination = parsed.get("destination")
@@ -915,12 +1258,14 @@ def _language_collection_pick_and_place(
     if not base_output_dir.is_absolute():
         base_output_dir = ROOT / base_output_dir
 
-    model_path = write_multi_object_scene_model(DEFAULT_MULTI_OBJECT_MODEL)
+    model_path = write_d435i_multi_object_scene_model(DEFAULT_D435I_MULTI_OBJECT_MODEL)
     subtasks: list[dict[str, Any]] = []
     sequence_items: list[PickPlaceSequenceItem] = []
+    used_tray_slots: list[int] = []
     for index, name in enumerate(target_names):
         target_object = _object_by_name(str(name))
-        sub_instruction = _single_object_instruction(target_object, destination)
+        sub_language_goal = _single_object_language_goal(target_object, destination)
+        sub_instruction = str(sub_language_goal["instruction"])
         sub_output_dir = base_output_dir / f"{index + 1:02d}_{target_object['name']}"
         located = multi_object_vl_locate(
             sub_instruction,
@@ -936,6 +1281,7 @@ def _language_collection_pick_and_place(
             max_parallel_vl=max_parallel_vl,
             min_accepted_views=min_accepted_views,
             depth_variant=depth_variant,
+            language_goal=sub_language_goal,
         )
         sub_parsed = located.get("language_goal")
         if located.get("status") != "ok":
@@ -959,13 +1305,20 @@ def _language_collection_pick_and_place(
         sub_destination = sub_parsed.get("destination") if isinstance(sub_parsed, dict) else destination
         target_surface_world = np.asarray(located["perception"]["fusion"]["fused_target_surface_world_m"], dtype=float)
         object_half_height = float(located["object_half_height_m"])
-        planned = plan_pick_place_trajectory(
-            target_surface_world,
-            _destination_place_xy(sub_destination, index),
+        planned, branch_selection = _plan_collection_pick_place_item(
+            model_path,
+            sequence_items,
+            object_name=str(target_object["name"]),
+            target_surface_world=target_surface_world,
+            place_xy=_destination_place_xy(sub_destination, index),
+            place_xy_candidates=_destination_next_place_xy_candidate(sub_destination, used_tray_slots),
             object_half_height=object_half_height,
             placement_surface_z=_destination_surface_z(sub_destination),
-            source_model=model_path,
+            fps=fps,
         )
+        selected_slot = branch_selection.get("selected", {}).get("place_slot_index")
+        if isinstance(selected_slot, int) and selected_slot >= 0:
+            used_tray_slots.append(selected_slot)
         sequence_items.append(PickPlaceSequenceItem(object_name=str(target_object["name"]), planned_trajectory=planned))
         subtasks.append(
             {
@@ -979,6 +1332,7 @@ def _language_collection_pick_and_place(
                     "segments": [_planned_segment_summary(segment) for segment in pick_place_segments(planned)],
                     "playback_duration_s": round(float(planned.total_playback_duration), 3),
                 },
+                "ik_branch_selection": branch_selection,
             }
         )
 
@@ -1003,7 +1357,7 @@ def _language_collection_pick_and_place(
         "subtasks": subtasks,
         "sequence": {
             "continuous_simulation": True,
-            "bridge_seconds": 2.4,
+            "bridge_seconds": SEQUENCE_BRIDGE_SECONDS,
             "frames": int(result.total_frames),
             "fps": fps,
             "playback_duration_s": round(float(result.total_frames) / float(fps), 3),
@@ -1017,6 +1371,11 @@ def _language_collection_pick_and_place(
         },
         "user_acceptance": "pending",
     }
+    if show_viewer:
+        play_pick_place_sequence_viewer(model_path, items=sequence_items, frames=actual_frames, fps=fps)
+        response["viewer"] = {"shown": True, "mode": "mujoco_passive", "blocking": True}
+    else:
+        response["viewer"] = {"shown": False}
     if render_gif:
         output = _collection_sequence_gif_path(output_path)
         render_pick_place_sequence_gif(
@@ -1036,6 +1395,184 @@ def _language_collection_pick_and_place(
         response["gif_paths"] = []
     return response
 
+def _plan_collection_pick_place_item(
+    model_path: Path,
+    sequence_items: list[PickPlaceSequenceItem],
+    *,
+    object_name: str,
+    target_surface_world: np.ndarray,
+    place_xy: list[float],
+    place_xy_candidates: list[tuple[int, list[float]]] | None = None,
+    object_half_height: float,
+    placement_surface_z: float,
+    fps: int,
+    preview_sequence: bool = True,
+) -> tuple[Any, dict[str, Any]]:
+    previous = sequence_items[-1].planned_trajectory if sequence_items else None
+    place_specs = place_xy_candidates or [(-1, place_xy)]
+    candidate_specs: list[tuple[float, str, np.ndarray | None]] = []
+    for yaw in PICK_PLACE_CANDIDATE_YAWS:
+        candidate_specs.append((float(yaw), "default", None))
+        if previous is not None:
+            candidate_specs.append((float(yaw), "previous_retreat", previous.poses.q_retreat))
+
+    candidates: list[dict[str, Any]] = []
+    if len(place_specs) == 1:
+        place_slot_index, candidate_place_xy = place_specs[0]
+        first_planned = None
+        first_summary = None
+        for candidate_index, (yaw, seed_name, seed_q) in enumerate(candidate_specs):
+            try:
+                planned = plan_pick_place_trajectory(
+                    target_surface_world,
+                    candidate_place_xy,
+                    object_half_height=object_half_height,
+                    placement_surface_z=placement_surface_z,
+                    source_model=model_path,
+                    grasp_yaw=yaw,
+                    seed_q=seed_q,
+                )
+                if previous is None:
+                    bridge_delta = np.zeros(6, dtype=float)
+                    joint_norm = 0.0
+                    min_place_spacing = 0.20
+                else:
+                    bridge_waypoints = sequence_bridge_waypoints(previous.poses.q_retreat, previous, planned)
+                    bridge_delta = bridge_waypoints[-1] - bridge_waypoints[0]
+                    joint_norm = float(np.linalg.norm(bridge_delta))
+                    min_place_spacing = min(
+                        float(np.linalg.norm(planned.place_center[:2] - item.planned_trajectory.place_center[:2]))
+                        for item in sequence_items
+                    )
+                candidate_summary = {
+                    "index": candidate_index,
+                    "place_slot_index": int(place_slot_index),
+                    "place_xy_m": [round(float(value), 6) for value in candidate_place_xy],
+                    "min_place_spacing_m": round(float(min_place_spacing), 6),
+                    "grasp_yaw_rad": round(float(yaw), 6),
+                    "seed": seed_name,
+                    "placed_in_preview": None,
+                    "bridge_delta_deg": [round(float(value), 3) for value in np.rad2deg(bridge_delta)],
+                    "bridge_joint_norm_rad": round(joint_norm, 6),
+                    "playback_duration_s": round(float(planned.total_playback_duration), 3),
+                }
+                candidates.append(candidate_summary)
+                if not preview_sequence:
+                    return planned, {"mode": "sequential_slot_first_feasible_no_preview", "selected": candidate_summary, "candidates": candidates}
+                item = PickPlaceSequenceItem(object_name=object_name, planned_trajectory=planned)
+                preview_items = [*sequence_items, item]
+                sequence_result = simulate_pick_place_sequence(model_path, preview_items, fps=fps, frames=0)
+                placed = bool(sequence_result.placed and sequence_result.item_results[-1].placed)
+                candidate_summary["placed_in_preview"] = placed
+                if first_planned is None:
+                    first_planned = planned
+                    first_summary = candidate_summary
+                if placed:
+                    return planned, {"mode": "sequential_slot_first_feasible", "selected": candidate_summary, "candidates": candidates}
+            except Exception as exc:
+                candidates.append(
+                    {
+                        "index": candidate_index,
+                        "place_slot_index": int(place_slot_index),
+                        "place_xy_m": [round(float(value), 6) for value in candidate_place_xy],
+                        "grasp_yaw_rad": round(float(yaw), 6),
+                        "seed": seed_name,
+                        "placed_in_preview": False,
+                        "score": None,
+                        "reject_reason": str(exc),
+                    }
+                )
+        if first_planned is not None:
+            return first_planned, {"mode": "sequential_slot_first_feasible", "selected": first_summary, "candidates": candidates}
+        raise RuntimeError(f"No feasible IK branch candidate for {object_name}.")
+
+    feasible_records: list[tuple[float, int, Any, dict[str, Any]]] = []
+    candidate_index = 0
+    for place_slot_index, candidate_place_xy in place_specs:
+        for yaw, seed_name, seed_q in candidate_specs:
+            try:
+                planned = plan_pick_place_trajectory(
+                    target_surface_world,
+                    candidate_place_xy,
+                    object_half_height=object_half_height,
+                    placement_surface_z=placement_surface_z,
+                    source_model=model_path,
+                    grasp_yaw=yaw,
+                    seed_q=seed_q,
+                )
+                if previous is None:
+                    bridge_delta = np.zeros(6, dtype=float)
+                    base_delta = 0.0
+                    wrist_flip_delta = 0.0
+                    wrist_roll_delta = 0.0
+                    joint_norm = 0.0
+                    min_place_spacing = 0.20
+                else:
+                    bridge_waypoints = sequence_bridge_waypoints(previous.poses.q_retreat, previous, planned)
+                    bridge_delta = bridge_waypoints[-1] - bridge_waypoints[0]
+                    base_delta = abs(float(bridge_delta[0]))
+                    wrist_flip_delta = abs(float(bridge_delta[4]))
+                    wrist_roll_delta = abs(float(bridge_delta[5]))
+                    joint_norm = float(np.linalg.norm(bridge_delta))
+                    min_place_spacing = min(
+                        float(np.linalg.norm(planned.place_center[:2] - item.planned_trajectory.place_center[:2]))
+                        for item in sequence_items
+                    )
+                score = (
+                    3.0 * base_delta
+                    + 1.8 * wrist_flip_delta
+                    + 0.8 * wrist_roll_delta
+                    + 0.4 * joint_norm
+                    + 0.03 * float(planned.total_playback_duration)
+                    - 1.2 * min(min_place_spacing, 0.18)
+                )
+                candidate_summary = {
+                    "index": candidate_index,
+                    "place_slot_index": int(place_slot_index),
+                    "place_xy_m": [round(float(value), 6) for value in candidate_place_xy],
+                    "min_place_spacing_m": round(float(min_place_spacing), 6),
+                    "grasp_yaw_rad": round(float(yaw), 6),
+                    "seed": seed_name,
+                    "placed_in_preview": None,
+                    "score": round(float(score), 6),
+                    "bridge_delta_deg": [round(float(value), 3) for value in np.rad2deg(bridge_delta)],
+                    "bridge_joint_norm_rad": round(joint_norm, 6),
+                    "playback_duration_s": round(float(planned.total_playback_duration), 3),
+                }
+                candidates.append(candidate_summary)
+                feasible_records.append((float(score), candidate_index, planned, candidate_summary))
+            except Exception as exc:
+                candidates.append(
+                    {
+                        "index": candidate_index,
+                        "place_slot_index": int(place_slot_index),
+                        "place_xy_m": [round(float(value), 6) for value in candidate_place_xy],
+                        "grasp_yaw_rad": round(float(yaw), 6),
+                        "seed": seed_name,
+                        "placed_in_preview": False,
+                        "score": None,
+                        "reject_reason": str(exc),
+                    }
+                )
+            candidate_index += 1
+
+    if not feasible_records:
+        raise RuntimeError(f"No feasible IK branch candidate for {object_name}.")
+    best_score, best_index, best_planned, selected = sorted(feasible_records, key=lambda item: item[0])[0]
+    for score, index, planned, candidate_summary in sorted(feasible_records, key=lambda item: item[0]):
+        item = PickPlaceSequenceItem(object_name=object_name, planned_trajectory=planned)
+        preview_items = [*sequence_items, item]
+        sequence_result = simulate_pick_place_sequence(model_path, preview_items, fps=fps, frames=0)
+        placed = bool(sequence_result.placed and sequence_result.item_results[-1].placed)
+        candidate_summary["placed_in_preview"] = placed
+        if placed:
+            best_score = score
+            best_index = index
+            best_planned = planned
+            selected = candidate_summary
+            break
+    return best_planned, {"mode": "ranked_preview_scored_multi_branch", "selected": selected, "candidates": candidates}
+
 def _destination_place_xy(destination: dict[str, Any], slot_index: int = 0) -> list[float]:
     if destination.get("type") == "tray":
         x, y = TRAY_PLACE_SLOTS[slot_index % len(TRAY_PLACE_SLOTS)]
@@ -1043,9 +1580,59 @@ def _destination_place_xy(destination: dict[str, Any], slot_index: int = 0) -> l
     return [float(value) for value in destination["world_xy_m"]]
 
 
+def _destination_place_xy_candidates(destination: dict[str, Any], used_slots: list[int] | None = None) -> list[tuple[int, list[float]]] | None:
+    if destination.get("type") != "tray":
+        return None
+    used = set(used_slots or [])
+    candidates = []
+    for slot_index, (x, y) in enumerate(TRAY_PLACE_SLOTS):
+        if slot_index in used:
+            continue
+        candidates.append((slot_index, [float(x), float(y)]))
+    return candidates or None
+
+
+def _destination_next_place_xy_candidate(destination: dict[str, Any], used_slots: list[int] | None = None) -> list[tuple[int, list[float]]] | None:
+    if destination.get("type") != "tray":
+        return None
+    used = set(used_slots or [])
+    for slot_index, (x, y) in enumerate(TRAY_PLACE_SLOTS):
+        if slot_index not in used:
+            return [(slot_index, [float(x), float(y)])]
+    return None
+
+
 def _destination_surface_z(destination: dict[str, Any]) -> float:
     return float(TRAY_FLOOR_TOP_Z if destination.get("type") == "tray" else TABLE_TOP_Z)
 
+
+def _single_object_language_goal(target_object: dict[str, Any], destination: dict[str, Any]) -> dict[str, Any]:
+    instruction = _single_object_instruction(target_object, destination)
+    target = {
+        "color": target_object.get("color"),
+        "shape": target_object.get("shape"),
+        "object_name": target_object.get("name"),
+        "object_names": [target_object.get("name")],
+        "quantifier": "one",
+        "constraints": {
+            "color": target_object.get("color"),
+            "shape": target_object.get("shape"),
+        },
+    }
+    goal = {
+        "status": "ok",
+        "instruction": instruction,
+        "action": "pick_and_place",
+        "target": target,
+        "destination": dict(destination),
+        "matched_objects": [_candidate_from_object(target_object)],
+        "ambiguities": [],
+        "warnings": [],
+        "scene_id": "gripper_multi_object_d435i",
+        "available_objects": object_specs_to_dicts(DEFAULT_MULTI_OBJECT_SPECS),
+    }
+    goal["vl_prompt"] = _build_goal_vl_prompt(goal)
+    return goal
 
 def _single_object_instruction(target_object: dict[str, Any], destination: dict[str, Any]) -> str:
     color = _color_text_cn(str(target_object.get("color", "")))
@@ -1484,6 +2071,8 @@ def _multi_view_candidate(
         region=region,
         foreground_quantile=0.05,
         foreground_margin_m=0.010,
+        bbox_expansion=1.25,
+        min_world_z_m=TABLE_TOP_Z + 0.004,
     )
     return {
         "pose": pose,
@@ -1672,6 +2261,34 @@ def _relative(path: Path) -> str:
         return str(Path(path).resolve().relative_to(ROOT))
     except ValueError:
         return str(Path(path).resolve())
+
+
+def _read_json_file(path: Path) -> Any:
+    try:
+        with path.open("r", encoding="utf-8-sig") as handle:
+            return json.load(handle)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def _pid_is_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    if sys.platform == "win32":
+        result = subprocess.run(
+            ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return str(pid) in result.stdout
+    try:
+        import os
+
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
 
 
 def _resolve_output_dir(output_dir: str | Path | None, default_name: str) -> Path:
