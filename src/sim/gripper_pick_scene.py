@@ -29,7 +29,7 @@ TRAY_WALL_HEIGHT = 0.026
 TRAY_FLOOR_TOP_Z = TABLE_TOP_Z + TRAY_HALF_SIZE[2] * 2.0
 TRAY_PLACE_SLOTS = (
     (0.575, -0.310),
-    (0.705, -0.430),
+    (0.701326, -0.426608),
     (0.575, -0.430),
     (0.705, -0.310),
 )

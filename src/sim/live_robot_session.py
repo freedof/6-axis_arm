@@ -39,6 +39,7 @@ DEFAULT_COMMAND_PATH = ROOT / "outputs" / "live_session" / "command.json"
 DEFAULT_STATUS_PATH = ROOT / "outputs" / "live_session" / "status.json"
 DEFAULT_POSES = ("scan_high", "scan_front_high", "scan_left_high", "scan_right_high")
 DEFAULT_DESTINATION = {"type": "tray", "region": "tray", "world_xy_m": [0.64, -0.37]}
+TRAY_MEMORY_FILENAME = "tray_memory.json"
 
 
 class LiveHud:
@@ -160,6 +161,9 @@ def main() -> None:
     status_path.parent.mkdir(parents=True, exist_ok=True)
     if command_path.exists():
         command_path.unlink()
+    tray_memory_path = command_path.parent / TRAY_MEMORY_FILENAME
+    tray_memory: dict[str, Any] = {"occupied_slots": [], "placements": []}
+    _write_tray_memory(tray_memory_path, tray_memory)
 
     session_info = {
         "pid": os.getpid(),
@@ -168,6 +172,7 @@ def main() -> None:
         "config_path": str(args.config_path) if args.config_path else None,
         "command_path": str(command_path),
         "status_path": str(status_path),
+        "tray_memory_path": str(tray_memory_path),
         "hud_enabled": not args.no_hud,
     }
     startup_start = time.perf_counter()
@@ -190,6 +195,7 @@ def main() -> None:
                 **session_info,
                 "status": "waiting",
                 "model_path": str(model_path),
+                "tray_occupied_slots": _tray_occupied_slots(tray_memory),
                 "startup_elapsed_s": round(time.perf_counter() - startup_start, 3),
             },
         )
@@ -231,6 +237,8 @@ def main() -> None:
                     camera_height=args.camera_height,
                     max_parallel_vl=args.max_parallel_vl,
                     fps=args.fps,
+                    tray_memory=tray_memory,
+                    tray_memory_path=tray_memory_path,
                 )
                 wait_pose = _first_photo_pose(command)
                 _write_status(
@@ -265,11 +273,12 @@ def main() -> None:
                         "waiting_pose": wait_pose,
                         "last_completion_status": "completed",
                         "last_completed_instruction": command.get("instruction"),
+                        "tray_occupied_slots": _tray_occupied_slots(tray_memory),
                     },
                 )
             except Exception as exc:
                 _set_hud(viewer, state="waiting", phase="error", detail=str(exc))
-                _write_status(status_path, {**session_info, "status": "waiting", "last_error": str(exc), "recoverable": True})
+                _write_status(status_path, {**session_info, "status": "waiting", "last_error": str(exc), "recoverable": True, "tray_occupied_slots": _tray_occupied_slots(tray_memory)})
                 continue
 
 
@@ -287,6 +296,8 @@ def _run_command(
     camera_height: int,
     max_parallel_vl: int,
     fps: int,
+    tray_memory: dict[str, Any],
+    tray_memory_path: Path,
 ) -> None:
     poses = tuple(command.get("poses") or DEFAULT_POSES)
     target_query = str(command.get("target_query") or command.get("open_vl_query") or "").strip()
@@ -295,7 +306,7 @@ def _run_command(
     destination = command.get("destination") or language_goal.get("destination") or DEFAULT_DESTINATION
     sequence_items: list[PickPlaceSequenceItem] = []
     localized_targets: list[dict[str, Any]] = []
-    used_tray_slots: list[int] = []
+    used_tray_slots: list[int] = _tray_occupied_slots(tray_memory)
     trace_path = output_dir / "waypoint_trace.json"
     trace_records: list[dict[str, Any]] = []
     _write_waypoint_trace(trace_path, trace_records)
@@ -325,6 +336,7 @@ def _run_command(
             max_parallel_vl=max_parallel_vl,
             min_accepted_views=int(command.get("min_accepted_views", 2)),
             depth_variant=str(command.get("depth_variant", "raw")),
+            early_vl_after_min_views=bool(command.get("early_vl_after_min_views", True)),
             fps=fps,
         )
         if located_all.get("status") != "ok":
@@ -355,6 +367,7 @@ def _run_command(
             max_parallel_vl=max_parallel_vl,
             min_accepted_views=int(command.get("min_accepted_views", 1)),
             depth_variant=str(command.get("depth_variant", "raw")),
+            early_vl_after_min_views=bool(command.get("early_vl_after_min_views", True)),
             fps=fps,
         )
         for index, object_name in enumerate(target_names):
@@ -418,6 +431,9 @@ def _run_command(
                 sequence_items=sequence_items,
                 trace_records=trace_records,
                 trace_path=trace_path,
+                tray_memory=tray_memory,
+                tray_memory_path=tray_memory_path,
+                instruction=str(command.get("instruction") or ""),
             )
             return
         _set_hud(viewer, phase="parallel_fixed_seed_planning", detail=f"Planning {len(localized_targets)} item(s)")
@@ -429,10 +445,20 @@ def _run_command(
             command=command,
             output_dir=output_dir,
             fps=fps,
+            occupied_tray_slots=_tray_occupied_slots(tray_memory),
         )
-        for item in planned_items:
-            _set_hud(viewer, phase="executing_planned_item", current_object=item.object_name, progress_current=len(sequence_items) + 1, progress_total=len(planned_items), detail="Executing preplanned trajectory")
+        for item, branch_selection in zip(planned_items, _branch_selections):
+            selected_slot = _selected_place_slot(branch_selection)
+            _set_hud(viewer, phase="executing_planned_item", current_object=item.object_name, current_slot=selected_slot, progress_current=len(sequence_items) + 1, progress_total=len(planned_items), detail="Executing preplanned trajectory")
             _play_pick_place_item(model, data, viewer, sequence_items, item, fps=fps, trace_records=trace_records, trace_path=trace_path)
+            if selected_slot is not None:
+                _record_tray_placement(
+                    tray_memory,
+                    tray_memory_path,
+                    slot_index=selected_slot,
+                    object_name=item.object_name,
+                    instruction=str(command.get("instruction") or ""),
+                )
             sequence_items.append(item)
         return
 
@@ -442,24 +468,36 @@ def _run_command(
         located = target["located"]
         target_surface_world = np.asarray(located["perception"]["fusion"]["fused_target_surface_world_m"], dtype=float)
         object_half_height = float(located["object_half_height_m"])
+        place_xy_candidates = skills._destination_place_xy_candidates(destination, used_tray_slots)
+        if destination.get("type") == "tray" and not place_xy_candidates:
+            raise RuntimeError("No remaining tray slots in session tray memory.")
+        preferred_place_xy = place_xy_candidates[0][1] if place_xy_candidates else skills._destination_place_xy(destination, index)
         planned, _branch_selection = skills._plan_collection_pick_place_item(
             source_model_path,
             sequence_items,
             object_name=object_name,
             target_surface_world=target_surface_world,
-            place_xy=skills._destination_place_xy(destination, index),
-            place_xy_candidates=skills._destination_place_xy_candidates(destination, used_tray_slots),
+            place_xy=preferred_place_xy,
+            place_xy_candidates=place_xy_candidates,
             object_half_height=object_half_height,
             placement_surface_z=skills._destination_surface_z(destination),
             fps=fps,
             preview_sequence=bool(command.get("preview_sequence", False)),
         )
-        selected_slot = _branch_selection.get("selected", {}).get("place_slot_index")
+        selected_slot = _selected_place_slot(_branch_selection)
         if isinstance(selected_slot, int) and selected_slot >= 0:
             used_tray_slots.append(selected_slot)
         item = PickPlaceSequenceItem(object_name=object_name, planned_trajectory=planned)
         _set_hud(viewer, phase="executing_planned_item", current_object=object_name, current_slot=selected_slot if isinstance(selected_slot, int) and selected_slot >= 0 else None, progress_current=index + 1, progress_total=len(localized_targets), detail="Executing planned trajectory")
         _play_pick_place_item(model, data, viewer, sequence_items, item, fps=fps, trace_records=trace_records, trace_path=trace_path)
+        if isinstance(selected_slot, int) and selected_slot >= 0:
+            _record_tray_placement(
+                tray_memory,
+                tray_memory_path,
+                slot_index=selected_slot,
+                object_name=object_name,
+                instruction=str(command.get("instruction") or ""),
+            )
         sequence_items.append(item)
 
 
@@ -471,6 +509,7 @@ def _plan_parallel_fixed_seed_items(
     command: dict[str, Any],
     output_dir: Path,
     fps: int,
+    occupied_tray_slots: list[int] | None = None,
 ) -> tuple[list[PickPlaceSequenceItem], list[dict[str, Any]]]:
     fixed_seed_pose = str(command.get("fixed_seed_pose") or _first_photo_pose(command))
     fixed_seed_q = _trajectory_pose(solve_pick_trajectory(), fixed_seed_pose)
@@ -515,6 +554,7 @@ def _plan_parallel_fixed_seed_items(
             fixed_seed_pose=fixed_seed_pose,
             fixed_seed_q=fixed_seed_q,
             fps=fps,
+            occupied_tray_slots=occupied_tray_slots or [],
         )
 
     results: list[tuple[int, PickPlaceSequenceItem, dict[str, Any]]] = []
@@ -562,6 +602,9 @@ def _run_pipelined_tray_pick_place(
     sequence_items: list[PickPlaceSequenceItem],
     trace_records: list[dict[str, Any]],
     trace_path: Path,
+    tray_memory: dict[str, Any],
+    tray_memory_path: Path,
+    instruction: str,
 ) -> None:
     fixed_seed_pose = str(command.get("fixed_seed_pose") or _first_photo_pose(command))
     fixed_seed_q = _trajectory_pose(solve_pick_trajectory(), fixed_seed_pose)
@@ -569,11 +612,15 @@ def _run_pipelined_tray_pick_place(
     planning_dir.mkdir(parents=True, exist_ok=True)
     ordered_targets = sorted(localized_targets, key=lambda item: int(item["index"]))
     slot_indices = list(range(len(skills.TRAY_PLACE_SLOTS)))
-    if len(ordered_targets) > len(slot_indices):
-        raise RuntimeError(f"Tray has {len(slot_indices)} place slots but VL produced {len(ordered_targets)} targets.")
+    initial_occupied_slots = _tray_occupied_slots(tray_memory)
+    remaining_slots = [slot for slot in slot_indices if slot not in set(initial_occupied_slots)]
+    if len(ordered_targets) > len(remaining_slots):
+        raise RuntimeError(
+            f"Tray memory has {len(remaining_slots)} remaining slots but VL produced {len(ordered_targets)} targets."
+        )
 
     workers = max(1, min(int(command.get("max_parallel_planning", len(ordered_targets))), len(ordered_targets)))
-    used_slots: list[int] = []
+    used_slots: list[int] = list(initial_occupied_slots)
     plan_records: list[dict[str, Any]] = []
     failed_records: list[dict[str, Any]] = []
     _set_hud(
@@ -665,6 +712,13 @@ def _run_pipelined_tray_pick_place(
                 background_planning_index=item_index + 1 if next_future is not None else None,
             )
             _play_pick_place_item(model, data, viewer, sequence_items, result["planned_item"], fps=fps, trace_records=trace_records, trace_path=trace_path)
+            _record_tray_placement(
+                tray_memory,
+                tray_memory_path,
+                slot_index=selected_slot,
+                object_name=target_name,
+                instruction=instruction,
+            )
             sequence_items.append(result["planned_item"])
 
             if next_future is not None:
@@ -842,10 +896,12 @@ def _plan_parallel_unique_tray_slot_items(
     fixed_seed_pose: str,
     fixed_seed_q: np.ndarray,
     fps: int,
+    occupied_tray_slots: list[int] | None = None,
 ) -> tuple[list[PickPlaceSequenceItem], list[dict[str, Any]]]:
-    slot_indices = list(range(len(skills.TRAY_PLACE_SLOTS)))
+    occupied = set(_normalize_tray_slots(occupied_tray_slots or []))
+    slot_indices = [slot for slot in range(len(skills.TRAY_PLACE_SLOTS)) if slot not in occupied]
     if len(localized_targets) > len(slot_indices):
-        raise RuntimeError(f"Tray has {len(slot_indices)} place slots but VL produced {len(localized_targets)} targets.")
+        raise RuntimeError(f"Tray memory has {len(slot_indices)} remaining slots but VL produced {len(localized_targets)} targets.")
 
     workers = max(1, min(int(command.get("max_parallel_planning", len(localized_targets))), len(localized_targets) * len(slot_indices)))
 
@@ -1032,6 +1088,22 @@ def _first_photo_pose(command: dict[str, Any]) -> str:
     return str(poses[0] if poses else DEFAULT_POSES[0])
 
 
+def _open_query_requires_all_views(target_query: str) -> bool:
+    query = f" {target_query.strip().lower()} "
+    collection_markers = (
+        " all ",
+        " every ",
+        " each ",
+        " all visible ",
+        " all cube",
+        " all cylinder",
+        " all object",
+        " except ",
+        " excluding ",
+    )
+    return any(marker in query for marker in collection_markers)
+
+
 def _return_to_photo_pose_1(
     model: mujoco.MjModel,
     data: mujoco.MjData,
@@ -1072,6 +1144,7 @@ def _scan_and_localize_multi_target(
     max_parallel_vl: int,
     min_accepted_views: int,
     depth_variant: str,
+    early_vl_after_min_views: bool,
     fps: int,
 ) -> dict[str, Any]:
     if provider != "openrouter_vision":
@@ -1083,7 +1156,9 @@ def _scan_and_localize_multi_target(
     trajectory = solve_pick_trajectory()
     current = data.qpos[:ROBOT_DOF].copy()
     workers = max(1, min(int(max_parallel_vl), len(poses)))
-    with ThreadPoolExecutor(max_workers=workers) as executor:
+    executor = ThreadPoolExecutor(max_workers=workers)
+    early_return = False
+    try:
         futures = {}
         for index, pose in enumerate(poses):
             _set_hud(viewer, phase="multi_target_vl_scan", detail=f"Capturing pose {index + 1}/{len(poses)}: {pose}")
@@ -1130,7 +1205,33 @@ def _scan_and_localize_multi_target(
                 except Exception as exc:
                     regions_by_pose[pose] = {"__error__": {"error": str(exc)}}
                 _set_hud(viewer, phase="waiting_for_vl", detail=f"{len(pending)} VL request(s) remaining")
-    return skills.multi_target_vl_results_from_observations(
+            if early_vl_after_min_views:
+                completed_poses = tuple(pose for pose in poses if pose in regions_by_pose)
+                if len(completed_poses) >= max(int(min_accepted_views), 2):
+                    early_result = skills.multi_target_vl_results_from_observations(
+                        target_names,
+                        observations=observations,
+                        regions_by_pose=regions_by_pose,
+                        provider=provider,
+                        depth_variant=depth_variant,
+                        poses=completed_poses,
+                        min_accepted_views=min_accepted_views,
+                    )
+                    if early_result.get("status") == "ok":
+                        for future in pending:
+                            future.cancel()
+                        early_result["early_vl_complete"] = True
+                        early_result["completed_vl_poses"] = list(completed_poses)
+                        early_result["pending_vl_poses"] = [futures[future] for future in pending]
+                        _set_hud(viewer, phase="early_vl_complete", detail=f"Continuing after {len(completed_poses)} trusted view(s)")
+                        _sync_viewer(viewer)
+                        early_return = True
+                        executor.shutdown(wait=False, cancel_futures=True)
+                        return early_result
+    finally:
+        if not early_return:
+            executor.shutdown(wait=True)
+    result = skills.multi_target_vl_results_from_observations(
         target_names,
         observations=observations,
         regions_by_pose=regions_by_pose,
@@ -1139,6 +1240,8 @@ def _scan_and_localize_multi_target(
         poses=poses,
         min_accepted_views=min_accepted_views,
     )
+    result["early_vl_complete"] = False
+    return result
 
 
 def _scan_and_localize_open_query(
@@ -1157,6 +1260,7 @@ def _scan_and_localize_open_query(
     max_parallel_vl: int,
     min_accepted_views: int,
     depth_variant: str,
+    early_vl_after_min_views: bool,
     fps: int,
 ) -> dict[str, Any]:
     if provider != "openrouter_vision":
@@ -1167,7 +1271,10 @@ def _scan_and_localize_open_query(
     trajectory = solve_pick_trajectory()
     current = data.qpos[:ROBOT_DOF].copy()
     workers = max(1, min(int(max_parallel_vl), len(poses)))
-    with ThreadPoolExecutor(max_workers=workers) as executor:
+    allow_early_completion = early_vl_after_min_views and not _open_query_requires_all_views(target_query)
+    executor = ThreadPoolExecutor(max_workers=workers)
+    early_return = False
+    try:
         futures = {}
         for index, pose in enumerate(poses):
             _set_hud(viewer, phase="open_query_vl_scan", detail=f"Capturing pose {index + 1}/{len(poses)}: {pose}")
@@ -1215,7 +1322,33 @@ def _scan_and_localize_open_query(
                 except Exception as exc:
                     regions_by_pose[pose] = {"__error__": {"error": str(exc)}}
                 _set_hud(viewer, phase="waiting_for_vl", detail=f"{len(pending)} VL request(s) remaining")
-    return skills.open_query_vl_results_from_observations(
+            if allow_early_completion:
+                completed_poses = tuple(pose for pose in poses if pose in regions_by_pose)
+                if len(completed_poses) >= max(int(min_accepted_views), 2):
+                    early_result = skills.open_query_vl_results_from_observations(
+                        target_query,
+                        observations=observations,
+                        regions_by_pose=regions_by_pose,
+                        provider=provider,
+                        depth_variant=depth_variant,
+                        poses=completed_poses,
+                        min_accepted_views=min_accepted_views,
+                    )
+                    if early_result.get("status") == "ok":
+                        for future in pending:
+                            future.cancel()
+                        early_result["early_vl_complete"] = True
+                        early_result["completed_vl_poses"] = list(completed_poses)
+                        early_result["pending_vl_poses"] = [futures[future] for future in pending]
+                        _set_hud(viewer, phase="early_vl_complete", detail=f"Continuing after {len(completed_poses)} trusted view(s)")
+                        _sync_viewer(viewer)
+                        early_return = True
+                        executor.shutdown(wait=False, cancel_futures=True)
+                        return early_result
+    finally:
+        if not early_return:
+            executor.shutdown(wait=True)
+    result = skills.open_query_vl_results_from_observations(
         target_query,
         observations=observations,
         regions_by_pose=regions_by_pose,
@@ -1224,6 +1357,8 @@ def _scan_and_localize_open_query(
         poses=poses,
         min_accepted_views=min_accepted_views,
     )
+    result["early_vl_complete"] = False
+    return result
 
 
 def _play_pick_place_item(
@@ -1651,6 +1786,73 @@ def _remove_command_file(command_path: Path) -> bool:
 def _write_status(status_path: Path, status: dict[str, Any]) -> None:
     status["updated_at"] = time.time()
     _write_json_atomic(status_path, status)
+
+
+def _normalize_tray_slots(slots: list[int] | tuple[int, ...] | Any) -> list[int]:
+    normalized: list[int] = []
+    if not isinstance(slots, (list, tuple)):
+        return normalized
+    max_slots = len(skills.TRAY_PLACE_SLOTS)
+    for value in slots:
+        try:
+            slot = int(value)
+        except (TypeError, ValueError):
+            continue
+        if 0 <= slot < max_slots and slot not in normalized:
+            normalized.append(slot)
+    return normalized
+
+
+def _tray_occupied_slots(tray_memory: dict[str, Any]) -> list[int]:
+    return _normalize_tray_slots(tray_memory.get("occupied_slots", []))
+
+
+def _selected_place_slot(branch_selection: dict[str, Any] | None) -> int | None:
+    if not isinstance(branch_selection, dict):
+        return None
+    selected = branch_selection.get("selected")
+    if not isinstance(selected, dict):
+        return None
+    slot = selected.get("place_slot_index")
+    if not isinstance(slot, int) or slot < 0:
+        return None
+    return int(slot)
+
+
+def _record_tray_placement(
+    tray_memory: dict[str, Any],
+    tray_memory_path: Path,
+    *,
+    slot_index: int,
+    object_name: str,
+    instruction: str,
+) -> None:
+    occupied_slots = _tray_occupied_slots(tray_memory)
+    slot = int(slot_index)
+    if slot not in occupied_slots:
+        occupied_slots.append(slot)
+    placements = tray_memory.get("placements")
+    if not isinstance(placements, list):
+        placements = []
+    placements.append(
+        {
+            "time_s": round(time.time(), 3),
+            "slot_index": slot,
+            "object_name": str(object_name),
+            "instruction": str(instruction),
+        }
+    )
+    tray_memory["occupied_slots"] = occupied_slots
+    tray_memory["placements"] = placements
+    _write_tray_memory(tray_memory_path, tray_memory)
+
+
+def _write_tray_memory(tray_memory_path: Path, tray_memory: dict[str, Any]) -> None:
+    payload = {
+        "occupied_slots": _tray_occupied_slots(tray_memory),
+        "placements": tray_memory.get("placements", []) if isinstance(tray_memory.get("placements"), list) else [],
+    }
+    _write_json_atomic(tray_memory_path, payload)
 
 
 def _write_json_atomic(path: Path, payload: Any) -> None:

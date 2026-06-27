@@ -1,0 +1,127 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 1140" font-family="'Microsoft YaHei','PingFang SC','Noto Sans CJK SC','Hiragino Sans GB',sans-serif">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#475569"/>
+    </marker>
+    <marker id="arrowLoop" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#d97706"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="720" height="1140" fill="#ffffff"/>
+
+  <!-- ===== subgraph backgrounds ===== -->
+  <rect x="206" y="256" width="448" height="252" rx="14" fill="#eef4ff" stroke="#c7d6fb" stroke-width="1.5"/>
+  <text x="222" y="280" font-size="15" font-weight="700" fill="#3b5bdb">感知 · 找在哪</text>
+
+  <rect x="206" y="598" width="448" height="172" rx="14" fill="#fff7e6" stroke="#f3d99b" stroke-width="1.5"/>
+  <text x="222" y="622" font-size="15" font-weight="700" fill="#c77d00">规划 · 怎么去</text>
+
+  <rect x="206" y="790" width="448" height="262" rx="14" fill="#ecfdf3" stroke="#a7e8c4" stroke-width="1.5"/>
+  <text x="222" y="814" font-size="15" font-weight="700" fill="#1f9254">物理 · 真的夹住了吗</text>
+
+  <!-- ===== main vertical arrows ===== -->
+  <g stroke="#475569" stroke-width="2" fill="none" marker-end="url(#arrow)">
+    <line x1="430" y1="78"  x2="430" y2="102"/>
+    <line x1="430" y1="158" x2="430" y2="182"/>
+    <line x1="430" y1="238" x2="430" y2="296"/>
+    <line x1="430" y1="352" x2="430" y2="376"/>
+    <line x1="430" y1="432" x2="430" y2="456"/>
+    <line x1="430" y1="518" x2="430" y2="556"/>
+    <line x1="430" y1="610" x2="430" y2="634"/>
+    <line x1="430" y1="690" x2="430" y2="714"/>
+    <line x1="430" y1="794" x2="430" y2="828"/>
+    <line x1="430" y1="884" x2="430" y2="908"/>
+    <line x1="430" y1="964" x2="430" y2="988"/>
+    <line x1="430" y1="1050" x2="430" y2="1080"/>
+  </g>
+
+  <!-- edge labels on main path -->
+  <g font-size="12.5" fill="#1f9254" font-weight="700">
+    <rect x="438" y="528" width="78" height="18" rx="4" fill="#ecfdf3"/>
+    <text x="444" y="541">是 · 聚类融合</text>
+  </g>
+  <g font-size="12.5" fill="#1f9254" font-weight="700">
+    <rect x="438" y="1056" width="44" height="18" rx="4" fill="#ffffff"/>
+    <text x="444" y="1069">通过</text>
+  </g>
+
+  <!-- ===== feedback loops (left channels) ===== -->
+  <!-- F 否 -> B -->
+  <polyline points="260,486 130,486 130,118 256,118" fill="none" stroke="#d97706" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#arrowLoop)"/>
+  <g font-size="12" fill="#d97706" font-weight="700">
+    <rect x="138" y="300" width="86" height="34" rx="5" fill="#fff7e6" stroke="#f3d99b"/>
+    <text x="148" y="316">否</text>
+    <text x="148" y="330">感知不可靠</text>
+  </g>
+
+  <!-- L 不通过 -> B -->
+  <polyline points="260,1018 86,1018 86,138 256,138" fill="none" stroke="#d97706" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#arrowLoop)"/>
+  <g font-size="12" fill="#d97706" font-weight="700">
+    <rect x="40" y="600" width="56" height="34" rx="5" fill="#ffffff" stroke="#f3d99b"/>
+    <text x="48" y="616">不通过</text>
+    <text x="48" y="630">重拍</text>
+  </g>
+
+  <!-- ===== nodes ===== -->
+  <!-- A start -->
+  <rect x="250" y="26" width="360" height="52" rx="26" fill="#1f9254"/>
+  <text x="430" y="48" text-anchor="middle" font-size="14.5" font-weight="700" fill="#ffffff">用户指令</text>
+  <text x="430" y="67" text-anchor="middle" font-size="13" fill="#eafff3">「把桌面上的红色方块夹起来」</text>
+
+  <!-- B -->
+  <rect x="256" y="102" width="348" height="52" rx="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+  <text x="430" y="133" text-anchor="middle" font-size="14" fill="#0f172a">机械臂移动腕部相机到观察位</text>
+
+  <!-- C -->
+  <rect x="256" y="182" width="348" height="52" rx="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+  <text x="430" y="204" text-anchor="middle" font-size="14" fill="#0f172a">D435i 多视角拍照</text>
+  <text x="430" y="223" text-anchor="middle" font-size="12.5" fill="#64748b">RGB 图 + 深度图</text>
+
+  <!-- D -->
+  <rect x="256" y="296" width="348" height="52" rx="10" fill="#ffffff" stroke="#c7d6fb" stroke-width="1.5"/>
+  <text x="430" y="318" text-anchor="middle" font-size="14" fill="#0f172a">VL 模型看 RGB 图</text>
+  <text x="430" y="337" text-anchor="middle" font-size="12.5" fill="#64748b">只输出目标区域 bbox</text>
+
+  <!-- E -->
+  <rect x="256" y="376" width="348" height="52" rx="10" fill="#ffffff" stroke="#c7d6fb" stroke-width="1.5"/>
+  <text x="430" y="398" text-anchor="middle" font-size="14" fill="#0f172a">深度图 + 相机内外参</text>
+  <text x="430" y="417" text-anchor="middle" font-size="12.5" fill="#64748b">反投影成三维候选点</text>
+
+  <!-- F decision -->
+  <rect x="256" y="456" width="348" height="62" rx="10" fill="#fff7e6" stroke="#e6b450" stroke-width="2"/>
+  <text x="430" y="481" text-anchor="middle" font-size="14" font-weight="700" fill="#92400e">多视角一致性检查</text>
+  <text x="430" y="501" text-anchor="middle" font-size="12.5" fill="#92400e">至少 2 个视角通过？</text>
+
+  <!-- G -->
+  <rect x="256" y="556" width="348" height="52" rx="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+  <text x="430" y="587" text-anchor="middle" font-size="14" fill="#0f172a">target_3d ：三维目标点</text>
+
+  <!-- H -->
+  <rect x="256" y="634" width="348" height="52" rx="10" fill="#ffffff" stroke="#f3d99b" stroke-width="1.5"/>
+  <text x="430" y="656" text-anchor="middle" font-size="14" fill="#0f172a">按方块尺寸估计中心</text>
+  <text x="430" y="675" text-anchor="middle" font-size="12.5" fill="#64748b">生成 3 个关键姿态</text>
+
+  <!-- I -->
+  <rect x="256" y="714" width="348" height="52" rx="10" fill="#ffffff" stroke="#f3d99b" stroke-width="1.5"/>
+  <text x="430" y="736" text-anchor="middle" font-size="14" fill="#0f172a">预抓取 → 抓取 → 抬升</text>
+  <text x="430" y="755" text-anchor="middle" font-size="12.5" fill="#64748b">RRT-Connect 规划关节路径</text>
+
+  <!-- J -->
+  <rect x="256" y="828" width="348" height="52" rx="10" fill="#ffffff" stroke="#a7e8c4" stroke-width="1.5"/>
+  <text x="430" y="850" text-anchor="middle" font-size="14" fill="#0f172a">MuJoCo 动力学仿真</text>
+  <text x="430" y="869" text-anchor="middle" font-size="12.5" fill="#64748b">夹爪接触 + 摩擦 + 抬升</text>
+
+  <!-- K -->
+  <rect x="256" y="908" width="348" height="52" rx="10" fill="#ffffff" stroke="#a7e8c4" stroke-width="1.5"/>
+  <text x="430" y="939" text-anchor="middle" font-size="14" fill="#0f172a">渲染 GIF</text>
+
+  <!-- L decision -->
+  <rect x="256" y="988" width="348" height="62" rx="10" fill="#ecfdf3" stroke="#34c77b" stroke-width="2"/>
+  <text x="430" y="1013" text-anchor="middle" font-size="14" font-weight="700" fill="#166534">大模型验收</text>
+  <text x="430" y="1033" text-anchor="middle" font-size="12.5" fill="#166534">动作是否真的合理？</text>
+
+  <!-- M end -->
+  <rect x="250" y="1080" width="360" height="50" rx="25" fill="#1f9254"/>
+  <text x="430" y="1111" text-anchor="middle" font-size="14.5" font-weight="700" fill="#ffffff">抓取成功</text>
+</svg>

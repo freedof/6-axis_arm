@@ -43,6 +43,7 @@ def main() -> None:
     if _session_is_reusable(existing, args.provider, args.model, hud_enabled=not args.no_hud):
         _print_status("reused", existing)
         return
+    _stop_non_reusable_session(existing)
 
     start_marker = time.time()
     _truncate_log(DEFAULT_STDOUT_PATH)
@@ -132,6 +133,8 @@ def _session_is_reusable(status: dict[str, Any], provider: str, model: str | Non
         return False
     if bool(status.get("hud_enabled", False)) != bool(hud_enabled):
         return False
+    if not status.get("tray_memory_path"):
+        return False
     return True
 
 
@@ -153,6 +156,21 @@ def _pid_is_alive(pid: int) -> bool:
     return True
 
 
+def _stop_non_reusable_session(status: dict[str, Any]) -> None:
+    pid = int(status.get("pid") or 0) if isinstance(status, dict) else 0
+    if not pid or not _pid_is_alive(pid):
+        return
+    if status.get("status") == "running":
+        raise RuntimeError(f"existing live session is running and is not reusable: {status}")
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True, text=True, check=False)
+        return
+    try:
+        os.kill(pid, 15)
+    except OSError:
+        return
+
+
 def _print_status(action: str, status: dict[str, Any]) -> None:
     summary = {
         "action": action,
@@ -163,6 +181,7 @@ def _print_status(action: str, status: dict[str, Any]) -> None:
         "model_path": status.get("model_path"),
         "command_path": status.get("command_path"),
         "hud_enabled": status.get("hud_enabled"),
+        "tray_memory_path": status.get("tray_memory_path"),
         "startup_elapsed_s": status.get("startup_elapsed_s"),
     }
     print(json.dumps(summary, ensure_ascii=False, indent=2), flush=True)
