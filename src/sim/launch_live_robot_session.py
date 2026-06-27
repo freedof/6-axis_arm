@@ -30,6 +30,7 @@ def main() -> None:
     parser.add_argument("--camera-height", type=int, default=240)
     parser.add_argument("--max-parallel-vl", type=int, default=4)
     parser.add_argument("--hold-seconds", type=float, default=5.0)
+    parser.add_argument("--no-hud", action="store_true", help="Disable the live MuJoCo native text overlay.")
     parser.add_argument("--wait-timeout", type=float, default=20.0)
     parser.add_argument("--new-console", action=argparse.BooleanOptionalAction, default=False)
     args = parser.parse_args()
@@ -39,7 +40,7 @@ def main() -> None:
     status_path.parent.mkdir(parents=True, exist_ok=True)
 
     existing = _read_json(status_path)
-    if _session_is_reusable(existing, args.provider, args.model):
+    if _session_is_reusable(existing, args.provider, args.model, hud_enabled=not args.no_hud):
         _print_status("reused", existing)
         return
 
@@ -77,6 +78,8 @@ def _start_live_session(args: argparse.Namespace, command_path: Path, status_pat
         cmd.extend(["--model", str(args.model)])
     if args.config_path:
         cmd.extend(["--config-path", str(_absolute(args.config_path))])
+    if args.no_hud:
+        cmd.append("--no-hud")
 
     creationflags = 0
     if os.name == "nt":
@@ -117,7 +120,7 @@ def _wait_for_ready(status_path: Path, process: subprocess.Popen, start_marker: 
     raise TimeoutError(f"live session did not reach waiting within {wait_timeout:.1f}s; latest status: {latest}")
 
 
-def _session_is_reusable(status: dict[str, Any], provider: str, model: str | None) -> bool:
+def _session_is_reusable(status: dict[str, Any], provider: str, model: str | None, *, hud_enabled: bool) -> bool:
     pid = int(status.get("pid") or 0)
     if not pid or not _pid_is_alive(pid):
         return False
@@ -126,6 +129,8 @@ def _session_is_reusable(status: dict[str, Any], provider: str, model: str | Non
     if status.get("provider") != provider:
         return False
     if (status.get("vl_model") or None) != (model or None):
+        return False
+    if bool(status.get("hud_enabled", False)) != bool(hud_enabled):
         return False
     return True
 
@@ -157,6 +162,7 @@ def _print_status(action: str, status: dict[str, Any]) -> None:
         "vl_model": status.get("vl_model"),
         "model_path": status.get("model_path"),
         "command_path": status.get("command_path"),
+        "hud_enabled": status.get("hud_enabled"),
         "startup_elapsed_s": status.get("startup_elapsed_s"),
     }
     print(json.dumps(summary, ensure_ascii=False, indent=2), flush=True)

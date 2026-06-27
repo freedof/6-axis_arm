@@ -41,6 +41,104 @@ DEFAULT_POSES = ("scan_high", "scan_front_high", "scan_left_high", "scan_right_h
 DEFAULT_DESTINATION = {"type": "tray", "region": "tray", "world_xy_m": [0.64, -0.37]}
 
 
+class LiveHud:
+    def __init__(self, *, enabled: bool, provider: str, model_name: str | None) -> None:
+        self.enabled = enabled
+        self.provider = provider
+        self.model_name = model_name
+        self.state = "starting"
+        self.phase = "loading_model"
+        self.instruction = ""
+        self.target_query = ""
+        self.target_count: int | None = None
+        self.progress_current: int | None = None
+        self.progress_total: int | None = None
+        self.current_object = ""
+        self.current_slot: int | None = None
+        self.detail = ""
+
+    def update(self, **values: Any) -> None:
+        for key, value in values.items():
+            if hasattr(self, key):
+                setattr(self, key, value)
+
+    def render(self, viewer) -> None:
+        if not self.enabled or not hasattr(viewer, "set_texts"):
+            return
+        left_lines = [
+            "CR5 Live Session",
+            f"State: {self.state}",
+            f"Phase: {self.phase}",
+            f"Provider: {self.provider}",
+        ]
+        if self.model_name:
+            left_lines.append(f"VL model: {self.model_name}")
+        if self.instruction:
+            left_lines.append(f"Instruction: {_hud_clip(self.instruction, 56)}")
+        if self.target_query:
+            left_lines.append(f"VL query: {_hud_clip(self.target_query, 56)}")
+
+        right_lines: list[str] = []
+        if self.target_count is not None:
+            right_lines.append(f"Targets: {self.target_count}")
+        if self.progress_current is not None and self.progress_total is not None:
+            right_lines.append(f"Progress: {self.progress_current}/{self.progress_total}")
+        if self.current_object:
+            right_lines.append(f"Current: {self.current_object}")
+        if self.current_slot is not None:
+            right_lines.append(f"Tray slot: {self.current_slot}")
+        if self.detail:
+            right_lines.append(f"Detail: {_hud_clip(self.detail, 64)}")
+        try:
+            viewer.set_texts(
+                (
+                    mujoco.mjtFontScale.mjFONTSCALE_150,
+                    mujoco.mjtGridPos.mjGRID_TOPRIGHT,
+                    "\n".join(left_lines),
+                    "\n".join(right_lines),
+                )
+            )
+        except Exception:
+            self.enabled = False
+
+
+def _hud_clip(value: str, limit: int) -> str:
+    text = " ".join(str(value).split())
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 3)] + "..."
+
+
+def _attach_hud(viewer, hud: LiveHud) -> None:
+    setattr(viewer, "_live_hud", hud)
+
+
+def _get_hud(viewer) -> LiveHud | None:
+    return getattr(viewer, "_live_hud", None)
+
+
+def _set_hud(viewer, **values: Any) -> None:
+    hud = _get_hud(viewer)
+    if hud is not None:
+        hud.update(**values)
+
+
+def _sync_viewer(viewer) -> None:
+    hud = _get_hud(viewer)
+    if hud is not None:
+        hud.render(viewer)
+    viewer.sync()
+
+
+def _await_future_with_hud(viewer, future, *, phase: str, detail: str) -> Any:
+    start = time.perf_counter()
+    while not future.done():
+        _set_hud(viewer, phase=phase, detail=f"{detail} ({time.perf_counter() - start:.1f}s)")
+        _sync_viewer(viewer)
+        time.sleep(0.1)
+    return future.result()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run a live MuJoCo robot session controlled by Codex command files.")
     parser.add_argument("--command-path", type=Path, default=DEFAULT_COMMAND_PATH)
@@ -53,6 +151,7 @@ def main() -> None:
     parser.add_argument("--camera-height", type=int, default=240)
     parser.add_argument("--max-parallel-vl", type=int, default=4)
     parser.add_argument("--hold-seconds", type=float, default=5.0)
+    parser.add_argument("--no-hud", action="store_true", help="Disable the live MuJoCo native text overlay.")
     args = parser.parse_args()
 
     command_path = _absolute(args.command_path)
@@ -69,6 +168,7 @@ def main() -> None:
         "config_path": str(args.config_path) if args.config_path else None,
         "command_path": str(command_path),
         "status_path": str(status_path),
+        "hud_enabled": not args.no_hud,
     }
     startup_start = time.perf_counter()
     _write_status(status_path, {**session_info, "status": "starting", "phase": "loading_model"})
@@ -82,6 +182,8 @@ def main() -> None:
     _write_status(status_path, {**session_info, "status": "starting", "phase": "opening_viewer", "model_path": str(model_path)})
 
     with mujoco.viewer.launch_passive(model, data) as viewer:
+        _attach_hud(viewer, LiveHud(enabled=not args.no_hud, provider=args.provider, model_name=args.model))
+        _set_hud(viewer, state="waiting", phase="waiting_for_command", detail="Ready")
         _write_status(
             status_path,
             {
@@ -92,15 +194,29 @@ def main() -> None:
             },
         )
         while viewer.is_running():
-            viewer.sync()
+            _sync_viewer(viewer)
             command = _read_command(command_path)
             if command is None:
                 time.sleep(0.05)
                 continue
             if command.get("action") == "shutdown":
+                _set_hud(viewer, state="shutdown_requested", phase="shutdown", detail="Closing viewer")
                 _write_status(status_path, {**session_info, "status": "shutdown_requested"})
                 break
             try:
+                _set_hud(
+                    viewer,
+                    state="running",
+                    phase="command_received",
+                    instruction=str(command.get("instruction") or ""),
+                    target_query=str(command.get("target_query") or command.get("open_vl_query") or ""),
+                    target_count=None,
+                    progress_current=None,
+                    progress_total=None,
+                    current_object="",
+                    current_slot=None,
+                    detail="Starting command",
+                )
                 _write_status(status_path, {**session_info, "status": "running", "instruction": command.get("instruction")})
                 _run_command(
                     model,
@@ -127,8 +243,19 @@ def main() -> None:
                         "last_completed_instruction": command.get("instruction"),
                     },
                 )
+                _set_hud(viewer, state="running", phase="returning_to_photo_pose_1", detail="Returning to waiting pose")
                 _return_to_photo_pose_1(model, data, viewer, wait_pose=wait_pose, fps=args.fps)
                 _write_robot_state(command_path.parent / "robot_state.json", model, data, phase="waiting_photo_pose_1")
+                _set_hud(
+                    viewer,
+                    state="waiting",
+                    phase="waiting_photo_pose_1",
+                    progress_current=None,
+                    progress_total=None,
+                    current_object="",
+                    current_slot=None,
+                    detail="Completed",
+                )
                 _write_status(
                     status_path,
                     {
@@ -141,6 +268,7 @@ def main() -> None:
                     },
                 )
             except Exception as exc:
+                _set_hud(viewer, state="waiting", phase="error", detail=str(exc))
                 _write_status(status_path, {**session_info, "status": "waiting", "last_error": str(exc), "recoverable": True})
                 continue
 
@@ -171,8 +299,17 @@ def _run_command(
     trace_path = output_dir / "waypoint_trace.json"
     trace_records: list[dict[str, Any]] = []
     _write_waypoint_trace(trace_path, trace_records)
+    _set_hud(
+        viewer,
+        state="running",
+        phase="preparing",
+        instruction=str(command.get("instruction") or ""),
+        target_query=target_query,
+        detail="Preparing perception",
+    )
 
     if target_query:
+        _set_hud(viewer, phase="open_query_vl_scan", detail="Scanning from D435i poses")
         located_all = _scan_and_localize_open_query(
             model,
             data,
@@ -200,7 +337,9 @@ def _run_command(
                     "located": located,
                 }
             )
+        _set_hud(viewer, phase="vl_grounded", target_count=len(localized_targets), progress_current=0, progress_total=len(localized_targets), detail=f"VL selected {len(localized_targets)} target(s)")
     elif bool(command.get("fast_multi_target_vl", provider == "openrouter_vision" and len(target_names) > 1)):
+        _set_hud(viewer, phase="multi_target_vl_scan", target_count=len(target_names), detail="Scanning named targets")
         located_all = _scan_and_localize_multi_target(
             model,
             data,
@@ -229,9 +368,12 @@ def _run_command(
                     "located": located,
                 }
             )
+        _set_hud(viewer, phase="vl_grounded", target_count=len(localized_targets), progress_current=0, progress_total=len(localized_targets), detail=f"VL selected {len(localized_targets)} target(s)")
     else:
+        _set_hud(viewer, phase="legacy_vl_scan", target_count=len(target_names), detail="Scanning target names")
         _play_scan_motion(model, data, viewer, poses=poses, fps=fps)
         for index, object_name in enumerate(target_names):
+            _set_hud(viewer, phase="legacy_vl_locate", current_object=object_name, detail=f"Localizing {object_name}")
             target_object = skills._object_by_name(object_name)
             sub_goal = _single_target_goal(language_goal, target_object, destination)
             sub_instruction = str(sub_goal.get("instruction") or command.get("instruction") or object_name)
@@ -258,6 +400,7 @@ def _run_command(
                     "located": located,
                 }
             )
+        _set_hud(viewer, phase="localized", target_count=len(localized_targets), progress_current=0, progress_total=len(localized_targets), detail=f"Localized {len(localized_targets)} target(s)")
 
     source_model_path = Path(model.xml_path) if getattr(model, "xml_path", None) else DEFAULT_D435I_MULTI_OBJECT_MODEL
     if bool(command.get("parallel_fixed_seed_planning", False)) and len(localized_targets) > 1:
@@ -277,6 +420,8 @@ def _run_command(
                 trace_path=trace_path,
             )
             return
+        _set_hud(viewer, phase="parallel_fixed_seed_planning", detail=f"Planning {len(localized_targets)} item(s)")
+        _sync_viewer(viewer)
         planned_items, _branch_selections = _plan_parallel_fixed_seed_items(
             localized_targets,
             source_model_path=source_model_path,
@@ -286,6 +431,7 @@ def _run_command(
             fps=fps,
         )
         for item in planned_items:
+            _set_hud(viewer, phase="executing_planned_item", current_object=item.object_name, progress_current=len(sequence_items) + 1, progress_total=len(planned_items), detail="Executing preplanned trajectory")
             _play_pick_place_item(model, data, viewer, sequence_items, item, fps=fps, trace_records=trace_records, trace_path=trace_path)
             sequence_items.append(item)
         return
@@ -312,6 +458,7 @@ def _run_command(
         if isinstance(selected_slot, int) and selected_slot >= 0:
             used_tray_slots.append(selected_slot)
         item = PickPlaceSequenceItem(object_name=object_name, planned_trajectory=planned)
+        _set_hud(viewer, phase="executing_planned_item", current_object=object_name, current_slot=selected_slot if isinstance(selected_slot, int) and selected_slot >= 0 else None, progress_current=index + 1, progress_total=len(localized_targets), detail="Executing planned trajectory")
         _play_pick_place_item(model, data, viewer, sequence_items, item, fps=fps, trace_records=trace_records, trace_path=trace_path)
         sequence_items.append(item)
 
@@ -429,6 +576,16 @@ def _run_pipelined_tray_pick_place(
     used_slots: list[int] = []
     plan_records: list[dict[str, Any]] = []
     failed_records: list[dict[str, Any]] = []
+    _set_hud(
+        viewer,
+        phase="pipeline_planning_first",
+        target_count=len(ordered_targets),
+        progress_current=0,
+        progress_total=len(ordered_targets),
+        current_object=str(ordered_targets[0]["object_name"]),
+        current_slot=None,
+        detail="Planning first executable path",
+    )
     _write_pipeline_summary(
         planning_dir,
         status="planning_first",
@@ -455,9 +612,11 @@ def _run_pipelined_tray_pick_place(
     with ThreadPoolExecutor(max_workers=workers) as executor:
         future = executor.submit(plan_target, ordered_targets[0], list(used_slots))
         for item_index, target in enumerate(ordered_targets):
-            result = future.result()
+            target_name = str(target["object_name"])
+            result = _await_future_with_hud(viewer, future, phase="pipeline_waiting_for_plan", detail=f"Planning {target_name}")
             if result.get("status") != "ok":
                 failed_records.append(_pipeline_plan_record(result))
+                _set_hud(viewer, phase="pipeline_planning_failed", current_object=target_name, detail=str(result.get("reason", "planning failed")))
                 _write_pipeline_summary(
                     planning_dir,
                     status="failed",
@@ -480,6 +639,19 @@ def _run_pipelined_tray_pick_place(
                 next_target = ordered_targets[item_index + 1]
                 next_future = executor.submit(plan_target, next_target, list(used_slots))
 
+            _set_hud(
+                viewer,
+                phase="executing_with_background_planning" if next_future is not None else "executing_last",
+                current_object=target_name,
+                current_slot=selected_slot,
+                progress_current=item_index + 1,
+                progress_total=len(ordered_targets),
+                detail=(
+                    f"Executing {target_name}; planning {ordered_targets[item_index + 1]['object_name']}"
+                    if next_future is not None
+                    else f"Executing {target_name}"
+                ),
+            )
             _write_pipeline_summary(
                 planning_dir,
                 status="executing_with_background_planning" if next_future is not None else "executing_last",
@@ -508,6 +680,8 @@ def _run_pipelined_tray_pick_place(
         plan_records=plan_records,
         failed_records=failed_records,
     )
+    _set_hud(viewer, phase="pipeline_completed", current_object="", current_slot=None, progress_current=len(ordered_targets), progress_total=len(ordered_targets), detail="All pipeline items completed")
+    _sync_viewer(viewer)
 
 
 def _plan_tray_target_with_slot_fallback(
@@ -845,7 +1019,8 @@ def _parallel_pair_summary(result: dict[str, Any]) -> dict[str, Any]:
 def _play_scan_motion(model: mujoco.MjModel, data: mujoco.MjData, viewer, *, poses: tuple[str, ...], fps: int) -> None:
     trajectory = solve_pick_trajectory()
     current = data.qpos[:ROBOT_DOF].copy()
-    for pose in poses:
+    for index, pose in enumerate(poses):
+        _set_hud(viewer, phase="scan_motion", detail=f"Moving to scan pose {index + 1}/{len(poses)}: {pose}")
         target = _trajectory_pose(trajectory, pose)
         _play_joint_interpolation(model, data, viewer, current, target, gripper=GRIPPER_OPEN_QPOS, duration_s=0.65, fps=fps)
         current = target.copy()
@@ -911,6 +1086,7 @@ def _scan_and_localize_multi_target(
     with ThreadPoolExecutor(max_workers=workers) as executor:
         futures = {}
         for index, pose in enumerate(poses):
+            _set_hud(viewer, phase="multi_target_vl_scan", detail=f"Capturing pose {index + 1}/{len(poses)}: {pose}")
             target_q = _trajectory_pose(trajectory, pose)
             _play_joint_interpolation(model, data, viewer, current, target_q, gripper=GRIPPER_OPEN_QPOS, duration_s=0.65, fps=fps)
             current = target_q.copy()
@@ -938,12 +1114,22 @@ def _scan_and_localize_multi_target(
                     config_path=config_path,
                 )
             ] = pose
-        for future in as_completed(futures):
-            pose = futures[future]
-            try:
-                regions_by_pose[pose] = future.result()
-            except Exception as exc:
-                regions_by_pose[pose] = {"__error__": {"error": str(exc)}}
+        pending = set(futures)
+        while pending:
+            done = {future for future in pending if future.done()}
+            if not done:
+                _set_hud(viewer, phase="waiting_for_vl", detail=f"{len(pending)} VL request(s) running")
+                _sync_viewer(viewer)
+                time.sleep(0.1)
+                continue
+            for future in done:
+                pending.remove(future)
+                pose = futures[future]
+                try:
+                    regions_by_pose[pose] = future.result()
+                except Exception as exc:
+                    regions_by_pose[pose] = {"__error__": {"error": str(exc)}}
+                _set_hud(viewer, phase="waiting_for_vl", detail=f"{len(pending)} VL request(s) remaining")
     return skills.multi_target_vl_results_from_observations(
         target_names,
         observations=observations,
@@ -984,6 +1170,7 @@ def _scan_and_localize_open_query(
     with ThreadPoolExecutor(max_workers=workers) as executor:
         futures = {}
         for index, pose in enumerate(poses):
+            _set_hud(viewer, phase="open_query_vl_scan", detail=f"Capturing pose {index + 1}/{len(poses)}: {pose}")
             target_q = _trajectory_pose(trajectory, pose)
             _play_joint_interpolation(model, data, viewer, current, target_q, gripper=GRIPPER_OPEN_QPOS, duration_s=0.65, fps=fps)
             current = target_q.copy()
@@ -1012,12 +1199,22 @@ def _scan_and_localize_open_query(
                     config_path=config_path,
                 )
             ] = pose
-        for future in as_completed(futures):
-            pose = futures[future]
-            try:
-                regions_by_pose[pose] = future.result()
-            except Exception as exc:
-                regions_by_pose[pose] = {"__error__": {"error": str(exc)}}
+        pending = set(futures)
+        while pending:
+            done = {future for future in pending if future.done()}
+            if not done:
+                _set_hud(viewer, phase="waiting_for_vl", detail=f"{len(pending)} VL request(s) running")
+                _sync_viewer(viewer)
+                time.sleep(0.1)
+                continue
+            for future in done:
+                pending.remove(future)
+                pose = futures[future]
+                try:
+                    regions_by_pose[pose] = future.result()
+                except Exception as exc:
+                    regions_by_pose[pose] = {"__error__": {"error": str(exc)}}
+                _set_hud(viewer, phase="waiting_for_vl", detail=f"{len(pending)} VL request(s) remaining")
     return skills.open_query_vl_results_from_observations(
         target_query,
         observations=observations,
@@ -1043,6 +1240,7 @@ def _play_pick_place_item(
     steps_per_frame = max(1, int(round(1.0 / (fps * model.opt.timestep))))
     item_index = len(previous_items)
     pick_above_label, grasp_label, place_above_label, place_label = _item_waypoint_labels(item_index)
+    _set_hud(viewer, phase="move_to_pick", current_object=item.object_name, detail="Moving above target")
     if previous_items:
         previous_retreat = previous_items[-1].planned_trajectory.poses.q_retreat
         _settle_robot_q(model, data, viewer, previous_retreat, gripper=GRIPPER_OPEN_QPOS, duration_s=1.6, fps=fps)
@@ -1058,7 +1256,7 @@ def _play_pick_place_item(
                 q_des = sequence_bridge_command_at_time(waypoints, step * model.opt.timestep, skills.SEQUENCE_BRIDGE_SECONDS)
                 _set_control_targets(model, data, q_des, GRIPPER_OPEN_QPOS)
                 mujoco.mj_step(model, data)
-            viewer.sync()
+            _sync_viewer(viewer)
             time.sleep(1.0 / max(float(fps), 1.0))
         _settle_robot_q(model, data, viewer, item.planned_trajectory.poses.q_pick_above, gripper=GRIPPER_OPEN_QPOS, duration_s=0.8, fps=fps)
     else:
@@ -1076,27 +1274,34 @@ def _play_pick_place_item(
         _settle_robot_q(model, data, viewer, item.planned_trajectory.poses.q_pick_above, gripper=GRIPPER_OPEN_QPOS, duration_s=0.8, fps=fps)
     _record_waypoint(trace_records, trace_path, model, data, item, item_index, pick_above_label, "pick_above_before_grasp", item.planned_trajectory.poses.q_pick_above)
 
+    _set_hud(viewer, phase="descend_to_grasp", current_object=item.object_name, detail="Descending to grasp")
     _hold_q(model, data, viewer, item.planned_trajectory.poses.q_pick_above, GRIPPER_OPEN_QPOS, PLANNED_PICK_ABOVE_DWELL_SECONDS, fps)
     _play_planned_segment(model, data, viewer, item.planned_trajectory.pick_above_to_grasp, GRIPPER_OPEN_QPOS, fps=fps)
     _settle_robot_q(model, data, viewer, item.planned_trajectory.poses.q_pick_grasp, gripper=GRIPPER_OPEN_QPOS, duration_s=0.8, fps=fps)
     _record_waypoint(trace_records, trace_path, model, data, item, item_index, grasp_label, "grasp_before_close", item.planned_trajectory.poses.q_pick_grasp)
 
+    _set_hud(viewer, phase="close_gripper", current_object=item.object_name, detail="Closing gripper")
     _play_gripper_transition(model, data, viewer, item.planned_trajectory.poses.q_pick_grasp, GRIPPER_OPEN_QPOS, GRIPPER_CLOSED_QPOS, PLANNED_PICK_CLOSE_SECONDS, fps)
     _hold_q(model, data, viewer, item.planned_trajectory.poses.q_pick_grasp, GRIPPER_CLOSED_QPOS, POST_GRASP_SETTLE_SECONDS, fps)
+    _set_hud(viewer, phase="lift_object", current_object=item.object_name, detail="Lifting object")
     _play_planned_segment(model, data, viewer, item.planned_trajectory.pick_grasp_to_lift, GRIPPER_CLOSED_QPOS, fps=fps)
     _settle_robot_q(model, data, viewer, item.planned_trajectory.poses.q_pick_lift, gripper=GRIPPER_CLOSED_QPOS, duration_s=0.8, fps=fps)
     _record_waypoint(trace_records, trace_path, model, data, item, item_index, pick_above_label, "pick_above_after_grasp", item.planned_trajectory.poses.q_pick_lift)
 
+    _set_hud(viewer, phase="transfer_to_place", current_object=item.object_name, detail="Moving to tray")
     _play_planned_segment(model, data, viewer, item.planned_trajectory.lift_to_place_above, GRIPPER_CLOSED_QPOS, fps=fps)
     _settle_robot_q(model, data, viewer, item.planned_trajectory.poses.q_place_above, gripper=GRIPPER_CLOSED_QPOS, duration_s=0.8, fps=fps)
     _record_waypoint(trace_records, trace_path, model, data, item, item_index, place_above_label, "place_above_before_place", item.planned_trajectory.poses.q_place_above)
 
+    _set_hud(viewer, phase="place_object", current_object=item.object_name, detail="Lowering to place")
     _hold_q(model, data, viewer, item.planned_trajectory.poses.q_place_above, GRIPPER_CLOSED_QPOS, PLANNED_PICK_ABOVE_DWELL_SECONDS, fps)
     _play_planned_segment(model, data, viewer, item.planned_trajectory.place_above_to_place, GRIPPER_CLOSED_QPOS, fps=fps)
     _settle_robot_q(model, data, viewer, item.planned_trajectory.poses.q_place, gripper=GRIPPER_CLOSED_QPOS, duration_s=0.8, fps=fps)
     _record_waypoint(trace_records, trace_path, model, data, item, item_index, place_label, "place_before_open", item.planned_trajectory.poses.q_place)
 
+    _set_hud(viewer, phase="open_gripper", current_object=item.object_name, detail="Releasing object")
     _play_gripper_transition(model, data, viewer, item.planned_trajectory.poses.q_place, GRIPPER_CLOSED_QPOS, GRIPPER_OPEN_QPOS, PLACE_OPEN_SECONDS, fps)
+    _set_hud(viewer, phase="retreat_after_place", current_object=item.object_name, detail="Retreating")
     _play_planned_segment(model, data, viewer, item.planned_trajectory.place_to_retreat, GRIPPER_OPEN_QPOS, fps=fps)
     _settle_robot_q(model, data, viewer, item.planned_trajectory.poses.q_retreat, gripper=GRIPPER_OPEN_QPOS, duration_s=1.6, fps=fps)
     _record_waypoint(trace_records, trace_path, model, data, item, item_index, place_above_label, "place_above_after_place", item.planned_trajectory.poses.q_retreat)
@@ -1123,7 +1328,7 @@ def _play_planned_segment(
             q_des, _, _ = segment.trajectory.sample(sim_time)
             _set_control_targets(model, data, q_des, gripper)
             mujoco.mj_step(model, data)
-        viewer.sync()
+        _sync_viewer(viewer)
         time.sleep(1.0 / max(float(fps), 1.0))
 
 
@@ -1146,7 +1351,7 @@ def _hold_q(
         for _ in range(steps_per_frame):
             _set_control_targets(model, data, target, gripper_cmd)
             mujoco.mj_step(model, data)
-        viewer.sync()
+        _sync_viewer(viewer)
         time.sleep(1.0 / max(float(fps), 1.0))
 
 
@@ -1170,7 +1375,7 @@ def _play_gripper_transition(
         for _ in range(steps_per_frame):
             _set_control_targets(model, data, target, gripper)
             mujoco.mj_step(model, data)
-        viewer.sync()
+        _sync_viewer(viewer)
         time.sleep(1.0 / max(float(fps), 1.0))
 
 
@@ -1193,7 +1398,7 @@ def _play_joint_interpolation(
         for _ in range(steps_per_frame):
             _set_control_targets(model, data, q_des, gripper)
             mujoco.mj_step(model, data)
-        viewer.sync()
+        _sync_viewer(viewer)
         time.sleep(1.0 / max(float(fps), 1.0))
 
 
@@ -1220,7 +1425,7 @@ def _settle_robot_q(
         for _ in range(steps_per_frame):
             _set_control_targets(model, data, target, gripper_cmd)
             mujoco.mj_step(model, data)
-        viewer.sync()
+        _sync_viewer(viewer)
         if frame_index + 1 >= min_frames:
             joint_error = float(np.linalg.norm(data.qpos[:ROBOT_DOF] - target))
             if joint_error <= joint_tolerance_rad:
@@ -1235,14 +1440,14 @@ def _hold(model: mujoco.MjModel, data: mujoco.MjData, viewer, *, duration_s: flo
     for _ in range(frames):
         for _ in range(steps_per_frame):
             mujoco.mj_step(model, data)
-        viewer.sync()
+        _sync_viewer(viewer)
         time.sleep(1.0 / max(float(fps), 1.0))
 
 
 def _hold_then_close(viewer, hold_seconds: float) -> None:
     end = time.time() + max(0.0, float(hold_seconds))
     while viewer.is_running() and time.time() < end:
-        viewer.sync()
+        _sync_viewer(viewer)
         time.sleep(0.05)
 
 
