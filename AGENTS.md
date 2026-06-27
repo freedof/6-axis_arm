@@ -207,6 +207,20 @@ or `language_multi_view_pick_and_place`. Use real VL providers such as
 recognition; use `codex_vision` only for interactive Codex-in-the-loop bbox
 selection; use `color_fixture` only for deterministic local validation.
 
+Keep VL pre-grounding free of god's-eye knowledge. Before a real or
+Codex-in-the-loop VL provider has produced visual regions and depth-lifted 3D
+targets, Codex must not inspect or use scene object specs, MJCF body names,
+default object lists, generated scene metadata, or MuJoCo state to determine
+which objects exist, how many targets there are, their colors, names, positions,
+or which objects match the user's instruction. For open-ended manipulation
+requests such as "pick all cubes into the tray", "pick the red cube into the
+tray", "pick all cubes except the red one", or "pick the red cube and green
+cylinder", Codex should pass an open visual `target_query` plus the destination
+into the live/VL pipeline and let D435i RGB-D + VL grounding discover the target
+instances. After VL grounding succeeds, the resulting observed targets
+(`vl_target_01`, `vl_target_02`, etc.) are the legitimate target set for
+counting, ordering, tray-slot assignment, parallel planning, and execution.
+
 For live demonstrations, use `src/sim/launch_live_robot_session.py` first. It
 reuses an existing waiting session when provider/model match, otherwise starts
 `src/sim/live_robot_session.py` as the long-running MuJoCo viewer process and

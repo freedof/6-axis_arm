@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import itertools
 import json
 import os
 from pathlib import Path
@@ -160,9 +161,10 @@ def _run_command(
     fps: int,
 ) -> None:
     poses = tuple(command.get("poses") or DEFAULT_POSES)
-    language_goal = _normalize_language_goal(command)
-    target_names = _target_names(language_goal)
-    destination = language_goal.get("destination") or DEFAULT_DESTINATION
+    target_query = str(command.get("target_query") or command.get("open_vl_query") or "").strip()
+    language_goal = {} if target_query else _normalize_language_goal(command)
+    target_names = [] if target_query else _target_names(language_goal)
+    destination = command.get("destination") or language_goal.get("destination") or DEFAULT_DESTINATION
     sequence_items: list[PickPlaceSequenceItem] = []
     localized_targets: list[dict[str, Any]] = []
     used_tray_slots: list[int] = []
@@ -170,8 +172,35 @@ def _run_command(
     trace_records: list[dict[str, Any]] = []
     _write_waypoint_trace(trace_path, trace_records)
 
-    use_fast_multi_target = bool(command.get("fast_multi_target_vl", provider == "openrouter_vision" and len(target_names) > 1))
-    if use_fast_multi_target:
+    if target_query:
+        located_all = _scan_and_localize_open_query(
+            model,
+            data,
+            viewer,
+            target_query,
+            output_dir=output_dir / "open_query_vl",
+            provider=provider,
+            vl_model_name=model_name,
+            config_path=config_path,
+            camera_width=camera_width,
+            camera_height=camera_height,
+            poses=poses,
+            max_parallel_vl=max_parallel_vl,
+            min_accepted_views=int(command.get("min_accepted_views", 2)),
+            depth_variant=str(command.get("depth_variant", "raw")),
+            fps=fps,
+        )
+        if located_all.get("status") != "ok":
+            raise RuntimeError(f"Open-query VL localization failed: {located_all.get('reason') or located_all}")
+        for index, located in enumerate(located_all.get("targets", [])):
+            localized_targets.append(
+                {
+                    "index": index,
+                    "object_name": str(located.get("object_name") or f"vl_target_{index + 1:02d}"),
+                    "located": located,
+                }
+            )
+    elif bool(command.get("fast_multi_target_vl", provider == "openrouter_vision" and len(target_names) > 1)):
         located_all = _scan_and_localize_multi_target(
             model,
             data,
@@ -257,7 +286,7 @@ def _run_command(
             object_name=object_name,
             target_surface_world=target_surface_world,
             place_xy=skills._destination_place_xy(destination, index),
-            place_xy_candidates=skills._destination_next_place_xy_candidate(destination, used_tray_slots),
+            place_xy_candidates=skills._destination_place_xy_candidates(destination, used_tray_slots),
             object_half_height=object_half_height,
             placement_surface_z=skills._destination_surface_z(destination),
             fps=fps,
@@ -285,6 +314,7 @@ def _plan_parallel_fixed_seed_items(
     workers = max(1, min(int(command.get("max_parallel_planning", len(localized_targets))), len(localized_targets)))
     planning_dir = output_dir / "parallel_fixed_seed_planning"
     planning_dir.mkdir(parents=True, exist_ok=True)
+    ordered_targets = sorted(localized_targets, key=lambda item: int(item["index"]))
 
     def plan_one(target: dict[str, Any]) -> tuple[int, PickPlaceSequenceItem, dict[str, Any]]:
         index = int(target["index"])
@@ -299,7 +329,7 @@ def _plan_parallel_fixed_seed_items(
             object_name=object_name,
             target_surface_world=target_surface_world,
             place_xy=place_xy,
-            place_xy_candidates=[(index, place_xy)],
+            place_xy_candidates=[(-1, place_xy)],
             object_half_height=object_half_height,
             placement_surface_z=skills._destination_surface_z(destination),
             fps=fps,
@@ -311,9 +341,22 @@ def _plan_parallel_fixed_seed_items(
         item = PickPlaceSequenceItem(object_name=object_name, planned_trajectory=planned)
         return index, item, branch_selection
 
+    if destination.get("type") == "tray":
+        return _plan_parallel_unique_tray_slot_items(
+            ordered_targets,
+            source_model_path=source_model_path,
+            destination=destination,
+            command=command,
+            output_dir=output_dir,
+            planning_dir=planning_dir,
+            fixed_seed_pose=fixed_seed_pose,
+            fixed_seed_q=fixed_seed_q,
+            fps=fps,
+        )
+
     results: list[tuple[int, PickPlaceSequenceItem, dict[str, Any]]] = []
     with ThreadPoolExecutor(max_workers=workers) as executor:
-        futures = [executor.submit(plan_one, target) for target in localized_targets]
+        futures = [executor.submit(plan_one, target) for target in ordered_targets]
         for future in as_completed(futures):
             results.append(future.result())
 
@@ -340,6 +383,191 @@ def _plan_parallel_fixed_seed_items(
         },
     )
     return planned_items, branch_selections
+
+
+def _plan_parallel_unique_tray_slot_items(
+    localized_targets: list[dict[str, Any]],
+    *,
+    source_model_path: Path,
+    destination: dict[str, Any],
+    command: dict[str, Any],
+    output_dir: Path,
+    planning_dir: Path,
+    fixed_seed_pose: str,
+    fixed_seed_q: np.ndarray,
+    fps: int,
+) -> tuple[list[PickPlaceSequenceItem], list[dict[str, Any]]]:
+    slot_indices = list(range(len(skills.TRAY_PLACE_SLOTS)))
+    if len(localized_targets) > len(slot_indices):
+        raise RuntimeError(f"Tray has {len(slot_indices)} place slots but VL produced {len(localized_targets)} targets.")
+
+    workers = max(1, min(int(command.get("max_parallel_planning", len(localized_targets))), len(localized_targets) * len(slot_indices)))
+
+    def plan_pair(target: dict[str, Any], slot_index: int) -> dict[str, Any]:
+        index = int(target["index"])
+        object_name = str(target["object_name"])
+        located = target["located"]
+        target_surface_world = np.asarray(located["perception"]["fusion"]["fused_target_surface_world_m"], dtype=float)
+        object_half_height = float(located["object_half_height_m"])
+        place_xy = skills._destination_place_xy(destination, slot_index)
+        try:
+            planned, branch_selection = skills._plan_collection_pick_place_item(
+                source_model_path,
+                [],
+                object_name=object_name,
+                target_surface_world=target_surface_world,
+                place_xy=place_xy,
+                place_xy_candidates=[(slot_index, place_xy)],
+                object_half_height=object_half_height,
+                placement_surface_z=skills._destination_surface_z(destination),
+                fps=fps,
+                preview_sequence=False,
+                fixed_seed_q=fixed_seed_q,
+                fixed_seed_name=f"fixed:{fixed_seed_pose}",
+                planning_model_path=planning_dir / f"{index:02d}_{object_name}_slot_{slot_index}_planning.xml",
+            )
+        except Exception as exc:
+            return {
+                "status": "failed",
+                "target_index": index,
+                "object_name": object_name,
+                "slot_index": int(slot_index),
+                "place_xy_m": [round(float(value), 6) for value in place_xy],
+                "reason": str(exc),
+            }
+        cost = _parallel_pair_cost(planned, branch_selection, target_index=index, slot_index=slot_index)
+        return {
+            "status": "ok",
+            "target_index": index,
+            "object_name": object_name,
+            "slot_index": int(slot_index),
+            "place_xy_m": [round(float(value), 6) for value in place_xy],
+            "cost": round(float(cost), 6),
+            "planned_item": PickPlaceSequenceItem(object_name=object_name, planned_trajectory=planned),
+            "branch_selection": branch_selection,
+            "playback_duration_s": round(float(planned.total_playback_duration), 3),
+            "transfer_reason": planned.lift_to_place_above.reason,
+        }
+
+    pair_results: list[dict[str, Any]] = []
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = [executor.submit(plan_pair, target, slot_index) for target in localized_targets for slot_index in slot_indices]
+        for future in as_completed(futures):
+            pair_results.append(future.result())
+
+    ok_by_pair = {
+        (int(result["target_index"]), int(result["slot_index"])): result
+        for result in pair_results
+        if result.get("status") == "ok"
+    }
+    best_assignment: list[dict[str, Any]] | None = None
+    best_cost = float("inf")
+    target_indices = [int(target["index"]) for target in localized_targets]
+    for slots in itertools.permutations(slot_indices, len(localized_targets)):
+        assignment: list[dict[str, Any]] = []
+        total_cost = 0.0
+        for target_index, slot_index in zip(target_indices, slots):
+            result = ok_by_pair.get((target_index, int(slot_index)))
+            if result is None:
+                assignment = []
+                break
+            assignment.append(result)
+            total_cost += float(result["cost"])
+        if assignment and total_cost < best_cost:
+            best_assignment = assignment
+            best_cost = total_cost
+
+    pair_summaries = [_parallel_pair_summary(result) for result in sorted(pair_results, key=lambda item: (int(item["target_index"]), int(item["slot_index"])))]
+    if best_assignment is None:
+        _write_json_atomic(
+            planning_dir / "summary.json",
+            {
+                "mode": "parallel_fixed_seed_unique_tray_slot_planning",
+                "status": "failed",
+                "fixed_seed_pose": fixed_seed_pose,
+                "workers": workers,
+                "target_count": len(localized_targets),
+                "slot_count": len(slot_indices),
+                "pair_candidates": pair_summaries,
+                "reason": "no feasible unique tray-slot assignment",
+            },
+        )
+        raise RuntimeError("No feasible unique tray-slot assignment for VL target set.")
+
+    best_assignment.sort(key=lambda item: int(item["target_index"]))
+    planned_items = [result["planned_item"] for result in best_assignment]
+    branch_selections = [
+        {
+            "mode": "parallel_unique_tray_slot_assignment",
+            "selected": {
+                **dict(result["branch_selection"].get("selected", {})),
+                "target_index": int(result["target_index"]),
+                "object_name": str(result["object_name"]),
+                "assigned_slot_index": int(result["slot_index"]),
+                "assignment_cost": round(float(result["cost"]), 6),
+            },
+            "pair_branch_selection": result["branch_selection"],
+        }
+        for result in best_assignment
+    ]
+    _write_json_atomic(
+        planning_dir / "summary.json",
+        {
+            "mode": "parallel_fixed_seed_unique_tray_slot_planning",
+            "status": "ok",
+            "fixed_seed_pose": fixed_seed_pose,
+            "workers": workers,
+            "target_count": len(localized_targets),
+            "slot_count": len(slot_indices),
+            "assignment_total_cost": round(float(best_cost), 6),
+            "items": [
+                {
+                    "index": int(result["target_index"]),
+                    "object_name": str(result["object_name"]),
+                    "assigned_slot_index": int(result["slot_index"]),
+                    "place_center_m": [round(float(value), 6) for value in result["planned_item"].planned_trajectory.place_center],
+                    "total_playback_duration_s": result["playback_duration_s"],
+                    "transfer_reason": result["transfer_reason"],
+                    "branch_selection": branch,
+                }
+                for result, branch in zip(best_assignment, branch_selections)
+            ],
+            "pair_candidates": pair_summaries,
+        },
+    )
+    return planned_items, branch_selections
+
+
+def _parallel_pair_cost(planned, branch_selection: dict[str, Any], *, target_index: int, slot_index: int) -> float:
+    selected = branch_selection.get("selected", {}) if isinstance(branch_selection, dict) else {}
+    score = selected.get("score")
+    if isinstance(score, (int, float)):
+        base = float(score)
+    else:
+        base = 0.03 * float(planned.total_playback_duration)
+    return base + 0.02 * abs(int(slot_index) - int(target_index))
+
+
+def _parallel_pair_summary(result: dict[str, Any]) -> dict[str, Any]:
+    summary = {
+        "status": result.get("status"),
+        "target_index": int(result["target_index"]),
+        "object_name": str(result["object_name"]),
+        "slot_index": int(result["slot_index"]),
+        "place_xy_m": result.get("place_xy_m"),
+    }
+    if result.get("status") == "ok":
+        summary.update(
+            {
+                "cost": result.get("cost"),
+                "playback_duration_s": result.get("playback_duration_s"),
+                "transfer_reason": result.get("transfer_reason"),
+                "branch_selection": result.get("branch_selection"),
+            }
+        )
+    else:
+        summary["reason"] = result.get("reason")
+    return summary
 
 
 def _play_scan_motion(model: mujoco.MjModel, data: mujoco.MjData, viewer, *, poses: tuple[str, ...], fps: int) -> None:
@@ -446,6 +674,80 @@ def _scan_and_localize_multi_target(
                 regions_by_pose[pose] = {"__error__": {"error": str(exc)}}
     return skills.multi_target_vl_results_from_observations(
         target_names,
+        observations=observations,
+        regions_by_pose=regions_by_pose,
+        provider=provider,
+        depth_variant=depth_variant,
+        poses=poses,
+        min_accepted_views=min_accepted_views,
+    )
+
+
+def _scan_and_localize_open_query(
+    model: mujoco.MjModel,
+    data: mujoco.MjData,
+    viewer,
+    target_query: str,
+    *,
+    output_dir: Path,
+    provider: str,
+    vl_model_name: str | None,
+    config_path: Path | None,
+    camera_width: int,
+    camera_height: int,
+    poses: tuple[str, ...],
+    max_parallel_vl: int,
+    min_accepted_views: int,
+    depth_variant: str,
+    fps: int,
+) -> dict[str, Any]:
+    if provider != "openrouter_vision":
+        raise ValueError("open-query live localization currently requires provider='openrouter_vision'.")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    observations: dict[str, dict[str, Any]] = {}
+    regions_by_pose: dict[str, dict[str, dict[str, Any]]] = {}
+    trajectory = solve_pick_trajectory()
+    current = data.qpos[:ROBOT_DOF].copy()
+    workers = max(1, min(int(max_parallel_vl), len(poses)))
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {}
+        for index, pose in enumerate(poses):
+            target_q = _trajectory_pose(trajectory, pose)
+            _play_joint_interpolation(model, data, viewer, current, target_q, gripper=GRIPPER_OPEN_QPOS, duration_s=0.65, fps=fps)
+            current = target_q.copy()
+            _hold(model, data, viewer, duration_s=0.15, fps=fps)
+            view_dir = output_dir / f"{index:02d}_{pose}"
+            observation = skills.render_d435i_preview(
+                view_dir,
+                width=camera_width,
+                height=camera_height,
+                seed=17 + index,
+                pose=pose,
+                scene_id="gripper_multi_object_d435i",
+            )
+            observations[pose] = observation
+            rgb_path = Path(observation["files"]["rgb"])
+            if not rgb_path.is_absolute():
+                rgb_path = ROOT / rgb_path
+            futures[
+                executor.submit(
+                    skills.locate_openrouter_vision_category_regions,
+                    rgb_path,
+                    category="target",
+                    target_query=target_query,
+                    output_path=view_dir / f"{pose}_open_query_vl_overlay.png",
+                    model=vl_model_name,
+                    config_path=config_path,
+                )
+            ] = pose
+        for future in as_completed(futures):
+            pose = futures[future]
+            try:
+                regions_by_pose[pose] = future.result()
+            except Exception as exc:
+                regions_by_pose[pose] = {"__error__": {"error": str(exc)}}
+    return skills.open_query_vl_results_from_observations(
+        target_query,
         observations=observations,
         regions_by_pose=regions_by_pose,
         provider=provider,
@@ -878,7 +1180,14 @@ def _write_json_atomic(path: Path, payload: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.with_name(f"{path.name}.{os.getpid()}.tmp")
     tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    os.replace(tmp_path, path)
+    for attempt in range(20):
+        try:
+            os.replace(tmp_path, path)
+            return
+        except PermissionError:
+            if attempt == 19:
+                raise
+            time.sleep(0.05)
 
 
 def _absolute(path: Path) -> Path:

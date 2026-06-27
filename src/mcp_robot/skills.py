@@ -16,7 +16,7 @@ if str(ROOT) not in sys.path:
 from src.perception.vl_region import estimate_region_3d as estimate_vl_region_3d
 from src.perception.vl_region import locate_ark_coding_vision_region
 from src.perception.vl_region import locate_codex_vision_region
-from src.perception.vl_region import locate_manual_region, locate_openai_vision_region, locate_openrouter_vision_region, locate_openrouter_vision_regions, locate_red_region_fixture
+from src.perception.vl_region import locate_manual_region, locate_openai_vision_region, locate_openrouter_vision_category_regions, locate_openrouter_vision_region, locate_openrouter_vision_regions, locate_red_region_fixture
 from src.perception.vl_region import region3d_to_dict
 from src.perception.language_goal import parse_language_goal as parse_language_goal_instruction
 from src.sim.gripper_model import DEFAULT_GRIPPER_MODEL, write_gripper_model
@@ -1044,6 +1044,142 @@ def multi_target_vl_results_from_observations(
     }
 
 
+def open_query_vl_results_from_observations(
+    target_query: str,
+    *,
+    observations: dict[str, dict[str, Any]],
+    regions_by_pose: dict[str, dict[str, dict[str, Any]]],
+    provider: str,
+    depth_variant: str,
+    poses: list[str] | tuple[str, ...],
+    min_accepted_views: int = 2,
+) -> dict[str, Any]:
+    depth_file_key = _depth_file_key(depth_variant)
+    selected_poses = tuple(str(pose) for pose in poses)
+    raw_candidates: list[dict[str, Any]] = []
+    for pose in selected_poses:
+        observation = observations[pose]
+        pose_regions = regions_by_pose.get(pose, {})
+        if "__error__" in pose_regions:
+            raw_candidates.append(
+                {
+                    "pose": pose,
+                    "accepted": False,
+                    "reject_reason": f"vl_failed: {pose_regions['__error__']['error']}",
+                    "observation": observation,
+                }
+            )
+            continue
+        for region_name, region in pose_regions.items():
+            depth_path = Path(observation["files"][depth_file_key])
+            if not depth_path.is_absolute():
+                depth_path = ROOT / depth_path
+            try:
+                estimate3d = estimate_vl_region_3d(
+                    depth_path=depth_path,
+                    intrinsics=observation["intrinsics"],
+                    extrinsic_world_to_camera=observation["extrinsic_world_to_camera"],
+                    region=region,
+                    foreground_quantile=0.05,
+                    foreground_margin_m=0.010,
+                    bbox_expansion=1.25,
+                    min_world_z_m=TABLE_TOP_Z + 0.004,
+                )
+                raw_candidates.append(
+                    {
+                        "pose": pose,
+                        "region_name": region_name,
+                        "accepted": False,
+                        "reject_reason": "not_scored",
+                        "observation": observation,
+                        "depth_variant": depth_variant,
+                        "depth_file": _relative(depth_path),
+                        "region": region,
+                        "target_3d": region3d_to_dict(estimate3d),
+                    }
+                )
+            except Exception as exc:
+                raw_candidates.append(
+                    {
+                        "pose": pose,
+                        "region_name": region_name,
+                        "accepted": False,
+                        "reject_reason": f"depth_failed: {exc}",
+                        "observation": observation,
+                        "region": region,
+                    }
+                )
+
+    scored = _score_open_query_candidates(raw_candidates)
+    accepted = [candidate for candidate in scored if candidate.get("accepted")]
+    clusters = _cluster_open_query_candidates(accepted, max_cluster_radius_m=0.045)
+    required_accepted = max(int(min_accepted_views), 2)
+    targets: list[dict[str, Any]] = []
+    for cluster_index, cluster in enumerate(clusters, start=1):
+        if len(cluster) < required_accepted:
+            for candidate in cluster:
+                candidate["accepted"] = False
+                candidate["reject_reason"] = f"cluster_has_too_few_views:{len(cluster)}"
+            continue
+        points = np.asarray([candidate["target_3d"]["center_world_m"] for candidate in cluster], dtype=float)
+        fused = np.median(points, axis=0)
+        mean_distance = float(np.mean(np.linalg.norm(points - fused, axis=1))) if len(points) else 0.0
+        confidence = float(np.clip(1.0 - mean_distance / 0.045, 0.05, 1.0))
+        object_half_height = float(np.clip(float(fused[2]) - TABLE_TOP_Z, 0.016, 0.040))
+        object_name = f"vl_target_{cluster_index:02d}"
+        targets.append(
+            {
+                "status": "ok",
+                "scene_id": "gripper_multi_object_d435i",
+                "skill": "open_query_vl_locate",
+                "object_name": object_name,
+                "object_half_height_m": round(object_half_height, 6),
+                "perception": {
+                    "status": "ok",
+                    "scene_id": "gripper_multi_object_d435i",
+                    "prompt": target_query,
+                    "provider": provider,
+                    "depth_variant": depth_variant,
+                    "poses": list(selected_poses),
+                    "candidates": cluster,
+                    "fusion": {
+                        "fused_target_surface_world_m": _round_vector(fused),
+                        "used_views": [candidate["pose"] for candidate in cluster],
+                        "accepted_count": len(cluster),
+                        "mean_distance_to_fused_m": round(mean_distance, 6),
+                        "confidence": round(confidence, 4),
+                        "rules": {
+                            "min_valid_pixels": 25,
+                            "min_surface_z_m": round(float(TABLE_TOP_Z + 0.004), 6),
+                            "max_surface_z_m": round(float(TABLE_TOP_Z + 0.120), 6),
+                            "max_cluster_radius_m": 0.045,
+                            "min_accepted_views": int(required_accepted),
+                        },
+                    },
+                    "mode": "open_query_multi_view_category_detection",
+                },
+            }
+        )
+    targets.sort(key=lambda item: item["perception"]["fusion"]["fused_target_surface_world_m"][0])
+    for index, target in enumerate(targets, start=1):
+        target["object_name"] = f"vl_target_{index:02d}"
+
+    return {
+        "status": "ok" if targets else "failed",
+        "scene_id": "gripper_multi_object_d435i",
+        "skill": "open_query_vl_locate",
+        "provider": provider,
+        "depth_variant": depth_variant,
+        "poses": list(selected_poses),
+        "target_query": target_query,
+        "observations": observations,
+        "candidates": scored,
+        "targets": targets,
+        "target_count": len(targets),
+        "reason": None if targets else "no multi-view target cluster matched the open VL query",
+    }
+
+
 def language_multi_view_pick_and_place(
     instruction: str,
     output_dir: str | Path | None = None,
@@ -1633,6 +1769,8 @@ def _plan_collection_pick_place_item(
     if not feasible_records:
         raise RuntimeError(f"No feasible IK branch candidate for {object_name}.")
     best_score, best_index, best_planned, selected = sorted(feasible_records, key=lambda item: item[0])[0]
+    if not preview_sequence:
+        return best_planned, {"mode": "ranked_scored_multi_branch_no_preview", "selected": selected, "candidates": candidates}
     for score, index, planned, candidate_summary in sorted(feasible_records, key=lambda item: item[0]):
         item = PickPlaceSequenceItem(object_name=object_name, planned_trajectory=planned)
         preview_items = [*sequence_items, item]
@@ -2224,6 +2362,84 @@ def _score_multi_view_candidates(
             candidate["accepted"] = True
             candidate["reject_reason"] = ""
     return candidates
+
+
+def _score_open_query_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return _score_candidates_without_spatial_pruning(
+        candidates,
+        min_valid_pixels=25,
+        min_surface_z_m=TABLE_TOP_Z + 0.004,
+        max_surface_z_m=TABLE_TOP_Z + 0.120,
+    )
+
+
+def _score_candidates_without_spatial_pruning(
+    candidates: list[dict[str, Any]],
+    *,
+    min_valid_pixels: int,
+    min_surface_z_m: float,
+    max_surface_z_m: float,
+) -> list[dict[str, Any]]:
+    for candidate in candidates:
+        reasons = []
+        target = candidate.get("target_3d")
+        if not isinstance(target, dict):
+            existing_reason = str(candidate.get("reject_reason", ""))
+            if existing_reason and existing_reason != "not_scored":
+                reasons.append(existing_reason)
+            else:
+                reasons.append("missing_target_3d")
+        else:
+            valid_pixels = int(target.get("valid_pixel_count", 0))
+            center = np.asarray(target.get("center_world_m", []), dtype=float)
+            if center.shape != (3,):
+                reasons.append("invalid_target_shape")
+            else:
+                z = float(center[2])
+                if valid_pixels < min_valid_pixels:
+                    reasons.append(f"too_few_depth_pixels:{valid_pixels}")
+                if z < min_surface_z_m:
+                    reasons.append(f"surface_z_too_low:{z:.6f}")
+                if z > max_surface_z_m:
+                    reasons.append(f"surface_z_too_high:{z:.6f}")
+        if reasons:
+            candidate["accepted"] = False
+            candidate["reject_reason"] = "; ".join(reasons)
+        else:
+            candidate["accepted"] = True
+            candidate["reject_reason"] = ""
+            candidate["cluster_distance_m"] = 0.0
+    return candidates
+
+
+def _cluster_open_query_candidates(
+    candidates: list[dict[str, Any]],
+    *,
+    max_cluster_radius_m: float,
+) -> list[list[dict[str, Any]]]:
+    remaining = list(candidates)
+    clusters: list[list[dict[str, Any]]] = []
+    while remaining:
+        points = np.asarray([candidate["target_3d"]["center_world_m"] for candidate in remaining], dtype=float)
+        best_indices: list[int] = []
+        best_confidence = -1.0
+        for index, point in enumerate(points):
+            distances = np.linalg.norm(points - point, axis=1)
+            indices = [i for i, distance in enumerate(distances) if float(distance) <= max_cluster_radius_m]
+            confidence = float(sum(remaining[i].get("region", {}).get("confidence", 0.0) for i in indices))
+            if len(indices) > len(best_indices) or (len(indices) == len(best_indices) and confidence > best_confidence):
+                best_indices = indices
+                best_confidence = confidence
+        cluster = [remaining[index] for index in best_indices]
+        fused = np.median(np.asarray([candidate["target_3d"]["center_world_m"] for candidate in cluster], dtype=float), axis=0)
+        for candidate in cluster:
+            point = np.asarray(candidate["target_3d"]["center_world_m"], dtype=float)
+            candidate["cluster_distance_m"] = round(float(np.linalg.norm(point - fused)), 6)
+        clusters.append(cluster)
+        selected_ids = {id(candidate) for candidate in cluster}
+        remaining = [candidate for candidate in remaining if id(candidate) not in selected_ids]
+    clusters.sort(key=lambda cluster: float(np.median(np.asarray([item["target_3d"]["center_world_m"] for item in cluster], dtype=float), axis=0)[0]))
+    return clusters
 
 
 def _dominant_spatial_cluster(

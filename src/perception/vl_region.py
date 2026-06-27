@@ -460,6 +460,87 @@ def locate_openrouter_vision_regions(
     return by_name
 
 
+def locate_openrouter_vision_category_regions(
+    rgb_path: str | Path,
+    *,
+    category: str,
+    target_query: str | None = None,
+    output_path: str | Path | None = None,
+    model: str | None = None,
+    api_key: str | None = None,
+    base_url: str | None = None,
+    config_path: str | Path | None = None,
+    timeout_s: float = 60.0,
+    max_objects: int = 8,
+) -> dict[str, dict[str, Any]]:
+    """Call OpenRouter once and return all visible tabletop objects matching a query."""
+    rgb_path = Path(rgb_path)
+    config, config_file = _provider_config("openrouter_vision", config_path)
+    key = api_key or str(config.get("api_key", ""))
+    if not key:
+        raise RuntimeError(f"api_key is required for provider='openrouter_vision' in {config_file}.")
+
+    selected_model = model or str(config.get("model", "google/gemini-3.5-flash"))
+    endpoint = _chat_completions_endpoint(base_url or str(config.get("base_url", "https://openrouter.ai/api/v1")))
+    image = Image.open(rgb_path).convert("RGB")
+    width, height = image.size
+    image_url = _image_data_url(rgb_path)
+    query = str(target_query or category)
+    instructions = (
+        "You are a visual grounding model for a robot manipulation system. "
+        "The image is captured by a wrist-mounted RGB-D camera looking at a tabletop scene. "
+        f"Find every visible tabletop object matching this target query: {query}. "
+        "The target query may include color, shape, count, spatial relation, inclusion, or exclusion constraints. "
+        "Return strict JSON only with key objects. "
+        "objects must be an array; each item must have keys: label, type, bbox_xyxy, confidence, reasoning. "
+        "Use type='bbox'. Use pixel coordinates in the original image with bbox_xyxy=[x1,y1,x2,y2]. "
+        "Box the full visible outer body of each physical object, including gray-lit top faces attached to colored side faces. "
+        "Do not include cylinders, tray, gripper, camera mount, table, shadows, empty background, or non-tabletop objects. "
+        "Do not invent hidden objects. If none are visible, return objects=[]."
+    )
+    user_text = f"Image size: width={width}, height={height}. Maximum objects: {int(max_objects)}."
+    payload = {
+        "model": selected_model,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": instructions + "\n" + user_text},
+                    {"type": "image_url", "image_url": {"url": image_url}},
+                ],
+            }
+        ],
+        "temperature": 0,
+    }
+    response = _post_json(endpoint, payload, api_key=key, timeout_s=timeout_s, provider_name="OpenRouter category vision")
+    raw = json.loads(_extract_chat_completion_text(response))
+    objects = _multi_target_objects(raw)[: max(0, int(max_objects))]
+
+    normalized_regions: list[dict[str, Any]] = []
+    for index, item in enumerate(objects):
+        region = dict(item)
+        region.setdefault("label", f"candidate_{index + 1}")
+        normalized = _normalize_region(region, prompt=f"Locate visible targets matching: {query}", provider="openrouter_vision", image_size=(width, height))
+        normalized["raw_label"] = str(item.get("label") or item.get("name") or normalized["label"])
+        normalized["model"] = selected_model
+        normalized["base_url"] = endpoint.rsplit("/chat/completions", 1)[0]
+        normalized["config_path"] = str(config_file)
+        normalized_regions.append(normalized)
+
+    normalized_regions.sort(key=lambda item: (_bbox_center(item["bbox_xyxy"])[1], _bbox_center(item["bbox_xyxy"])[0]))
+    by_name: dict[str, dict[str, Any]] = {}
+    for index, region in enumerate(normalized_regions, start=1):
+        name = f"candidate_{index}"
+        region["name"] = name
+        region["label"] = name
+        by_name[name] = region
+    if output_path is not None:
+        overlay_path = _draw_regions_overlay(rgb_path, by_name, output_path)
+        for region in by_name.values():
+            region["overlay_path"] = str(overlay_path)
+    return by_name
+
+
 def estimate_region_3d(
     *,
     depth_path: str | Path,
@@ -589,6 +670,11 @@ def _clip_bbox(bbox: tuple[int, int, int, int], width: int, height: int) -> tupl
     x2 = max(x1 + 1, min(width, x2))
     y2 = max(y1 + 1, min(height, y2))
     return x1, y1, x2, y2
+
+
+def _bbox_center(bbox: list[int] | tuple[int, int, int, int]) -> tuple[float, float]:
+    x1, y1, x2, y2 = [float(value) for value in bbox]
+    return (0.5 * (x1 + x2), 0.5 * (y1 + y2))
 
 
 def _largest_connected_mask(mask: np.ndarray) -> np.ndarray:
