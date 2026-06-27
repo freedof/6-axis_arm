@@ -261,6 +261,22 @@ def _run_command(
 
     source_model_path = Path(model.xml_path) if getattr(model, "xml_path", None) else DEFAULT_D435I_MULTI_OBJECT_MODEL
     if bool(command.get("parallel_fixed_seed_planning", False)) and len(localized_targets) > 1:
+        if destination.get("type") == "tray" and bool(command.get("pipeline_planning", True)):
+            _run_pipelined_tray_pick_place(
+                model,
+                data,
+                viewer,
+                localized_targets,
+                source_model_path=source_model_path,
+                destination=destination,
+                command=command,
+                output_dir=output_dir,
+                fps=fps,
+                sequence_items=sequence_items,
+                trace_records=trace_records,
+                trace_path=trace_path,
+            )
+            return
         planned_items, _branch_selections = _plan_parallel_fixed_seed_items(
             localized_targets,
             source_model_path=source_model_path,
@@ -383,6 +399,262 @@ def _plan_parallel_fixed_seed_items(
         },
     )
     return planned_items, branch_selections
+
+
+def _run_pipelined_tray_pick_place(
+    model: mujoco.MjModel,
+    data: mujoco.MjData,
+    viewer,
+    localized_targets: list[dict[str, Any]],
+    *,
+    source_model_path: Path,
+    destination: dict[str, Any],
+    command: dict[str, Any],
+    output_dir: Path,
+    fps: int,
+    sequence_items: list[PickPlaceSequenceItem],
+    trace_records: list[dict[str, Any]],
+    trace_path: Path,
+) -> None:
+    fixed_seed_pose = str(command.get("fixed_seed_pose") or _first_photo_pose(command))
+    fixed_seed_q = _trajectory_pose(solve_pick_trajectory(), fixed_seed_pose)
+    planning_dir = output_dir / "pipeline_tray_planning"
+    planning_dir.mkdir(parents=True, exist_ok=True)
+    ordered_targets = sorted(localized_targets, key=lambda item: int(item["index"]))
+    slot_indices = list(range(len(skills.TRAY_PLACE_SLOTS)))
+    if len(ordered_targets) > len(slot_indices):
+        raise RuntimeError(f"Tray has {len(slot_indices)} place slots but VL produced {len(ordered_targets)} targets.")
+
+    workers = max(1, min(int(command.get("max_parallel_planning", len(ordered_targets))), len(ordered_targets)))
+    used_slots: list[int] = []
+    plan_records: list[dict[str, Any]] = []
+    failed_records: list[dict[str, Any]] = []
+    _write_pipeline_summary(
+        planning_dir,
+        status="planning_first",
+        fixed_seed_pose=fixed_seed_pose,
+        workers=workers,
+        target_count=len(ordered_targets),
+        used_slots=used_slots,
+        plan_records=plan_records,
+        failed_records=failed_records,
+    )
+
+    def plan_target(target: dict[str, Any], used_slots_snapshot: list[int]) -> dict[str, Any]:
+        return _plan_tray_target_with_slot_fallback(
+            target,
+            used_slots=used_slots_snapshot,
+            source_model_path=source_model_path,
+            destination=destination,
+            planning_dir=planning_dir,
+            fixed_seed_pose=fixed_seed_pose,
+            fixed_seed_q=fixed_seed_q,
+            fps=fps,
+        )
+
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        future = executor.submit(plan_target, ordered_targets[0], list(used_slots))
+        for item_index, target in enumerate(ordered_targets):
+            result = future.result()
+            if result.get("status") != "ok":
+                failed_records.append(_pipeline_plan_record(result))
+                _write_pipeline_summary(
+                    planning_dir,
+                    status="failed",
+                    fixed_seed_pose=fixed_seed_pose,
+                    workers=workers,
+                    target_count=len(ordered_targets),
+                    used_slots=used_slots,
+                    plan_records=plan_records,
+                    failed_records=failed_records,
+                    reason=str(result.get("reason", "planning failed")),
+                )
+                raise RuntimeError(f"Pipeline planning failed for {target['object_name']}: {result.get('reason')}")
+
+            selected_slot = int(result["slot_index"])
+            used_slots.append(selected_slot)
+            plan_records.append(_pipeline_plan_record(result))
+
+            next_future = None
+            if item_index + 1 < len(ordered_targets):
+                next_target = ordered_targets[item_index + 1]
+                next_future = executor.submit(plan_target, next_target, list(used_slots))
+
+            _write_pipeline_summary(
+                planning_dir,
+                status="executing_with_background_planning" if next_future is not None else "executing_last",
+                fixed_seed_pose=fixed_seed_pose,
+                workers=workers,
+                target_count=len(ordered_targets),
+                used_slots=used_slots,
+                plan_records=plan_records,
+                failed_records=failed_records,
+                executing_index=item_index,
+                background_planning_index=item_index + 1 if next_future is not None else None,
+            )
+            _play_pick_place_item(model, data, viewer, sequence_items, result["planned_item"], fps=fps, trace_records=trace_records, trace_path=trace_path)
+            sequence_items.append(result["planned_item"])
+
+            if next_future is not None:
+                future = next_future
+
+    _write_pipeline_summary(
+        planning_dir,
+        status="completed",
+        fixed_seed_pose=fixed_seed_pose,
+        workers=workers,
+        target_count=len(ordered_targets),
+        used_slots=used_slots,
+        plan_records=plan_records,
+        failed_records=failed_records,
+    )
+
+
+def _plan_tray_target_with_slot_fallback(
+    target: dict[str, Any],
+    *,
+    used_slots: list[int],
+    source_model_path: Path,
+    destination: dict[str, Any],
+    planning_dir: Path,
+    fixed_seed_pose: str,
+    fixed_seed_q: np.ndarray,
+    fps: int,
+) -> dict[str, Any]:
+    index = int(target["index"])
+    object_name = str(target["object_name"])
+    located = target["located"]
+    target_surface_world = np.asarray(located["perception"]["fusion"]["fused_target_surface_world_m"], dtype=float)
+    object_half_height = float(located["object_half_height_m"])
+    attempts: list[dict[str, Any]] = []
+    used = set(int(slot) for slot in used_slots)
+    preferred = index % len(skills.TRAY_PLACE_SLOTS)
+    slot_order = [slot for slot in [preferred, *range(len(skills.TRAY_PLACE_SLOTS))] if slot not in used]
+    slot_order = list(dict.fromkeys(slot_order))
+    if not slot_order:
+        return {
+            "status": "failed",
+            "target_index": index,
+            "object_name": object_name,
+            "reason": "no remaining tray slots",
+            "attempts": attempts,
+        }
+
+    for slot_index in slot_order:
+        place_xy = skills._destination_place_xy(destination, slot_index)
+        try:
+            planned, branch_selection = skills._plan_collection_pick_place_item(
+                source_model_path,
+                [],
+                object_name=object_name,
+                target_surface_world=target_surface_world,
+                place_xy=place_xy,
+                place_xy_candidates=[(slot_index, place_xy)],
+                object_half_height=object_half_height,
+                placement_surface_z=skills._destination_surface_z(destination),
+                fps=fps,
+                preview_sequence=False,
+                fixed_seed_q=fixed_seed_q,
+                fixed_seed_name=f"fixed:{fixed_seed_pose}",
+                planning_model_path=planning_dir / f"{index:02d}_{object_name}_slot_{slot_index}_planning.xml",
+            )
+        except Exception as exc:
+            attempts.append(
+                {
+                    "status": "failed",
+                    "slot_index": int(slot_index),
+                    "place_xy_m": [round(float(value), 6) for value in place_xy],
+                    "reason": str(exc),
+                }
+            )
+            continue
+        attempts.append(
+            {
+                "status": "ok",
+                "slot_index": int(slot_index),
+                "place_xy_m": [round(float(value), 6) for value in place_xy],
+                "branch_selection": branch_selection,
+                "playback_duration_s": round(float(planned.total_playback_duration), 3),
+                "transfer_reason": planned.lift_to_place_above.reason,
+            }
+        )
+        return {
+            "status": "ok",
+            "target_index": index,
+            "object_name": object_name,
+            "slot_index": int(slot_index),
+            "place_xy_m": [round(float(value), 6) for value in place_xy],
+            "planned_item": PickPlaceSequenceItem(object_name=object_name, planned_trajectory=planned),
+            "branch_selection": branch_selection,
+            "playback_duration_s": round(float(planned.total_playback_duration), 3),
+            "transfer_reason": planned.lift_to_place_above.reason,
+            "attempts": attempts,
+        }
+
+    return {
+        "status": "failed",
+        "target_index": index,
+        "object_name": object_name,
+        "reason": "no feasible remaining tray slot",
+        "attempts": attempts,
+    }
+
+
+def _pipeline_plan_record(result: dict[str, Any]) -> dict[str, Any]:
+    record = {
+        "status": result.get("status"),
+        "index": int(result["target_index"]),
+        "object_name": str(result["object_name"]),
+        "attempts": result.get("attempts", []),
+    }
+    if result.get("status") == "ok":
+        record.update(
+            {
+                "assigned_slot_index": int(result["slot_index"]),
+                "place_xy_m": result.get("place_xy_m"),
+                "place_center_m": [round(float(value), 6) for value in result["planned_item"].planned_trajectory.place_center],
+                "total_playback_duration_s": result.get("playback_duration_s"),
+                "transfer_reason": result.get("transfer_reason"),
+                "branch_selection": result.get("branch_selection"),
+            }
+        )
+    else:
+        record["reason"] = result.get("reason")
+    return record
+
+
+def _write_pipeline_summary(
+    planning_dir: Path,
+    *,
+    status: str,
+    fixed_seed_pose: str,
+    workers: int,
+    target_count: int,
+    used_slots: list[int],
+    plan_records: list[dict[str, Any]],
+    failed_records: list[dict[str, Any]],
+    executing_index: int | None = None,
+    background_planning_index: int | None = None,
+    reason: str | None = None,
+) -> None:
+    payload: dict[str, Any] = {
+        "mode": "pipelined_tray_planning",
+        "status": status,
+        "fixed_seed_pose": fixed_seed_pose,
+        "workers": int(workers),
+        "target_count": int(target_count),
+        "used_slots": [int(slot) for slot in used_slots],
+        "slots_unique": len(used_slots) == len(set(used_slots)),
+        "items": plan_records,
+        "failed_items": failed_records,
+    }
+    if executing_index is not None:
+        payload["executing_index"] = int(executing_index)
+    if background_planning_index is not None:
+        payload["background_planning_index"] = int(background_planning_index)
+    if reason:
+        payload["reason"] = reason
+    _write_json_atomic(planning_dir / "summary.json", payload)
 
 
 def _plan_parallel_unique_tray_slot_items(
