@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import os
 from pathlib import Path
@@ -16,17 +17,20 @@ DEFAULT_STATUS_PATH = ROOT / "outputs" / "live_session" / "status.json"
 
 
 def main() -> None:
+    _configure_stdio()
     parser = argparse.ArgumentParser(description="Atomically submit a command to the CR5 live MuJoCo session.")
     parser.add_argument("--command-path", type=Path, default=DEFAULT_COMMAND_PATH)
     parser.add_argument("--status-path", type=Path, default=DEFAULT_STATUS_PATH)
-    parser.add_argument("--command-file", type=Path, default=None, help="JSON command file. Defaults to stdin.")
+    command_source = parser.add_mutually_exclusive_group()
+    command_source.add_argument("--command-file", type=Path, default=None, help="JSON command file. Defaults to stdin.")
+    command_source.add_argument("--command-b64", default=None, help="Base64-encoded UTF-8 JSON command.")
     parser.add_argument("--require-openrouter-reachable", action="store_true")
     parser.add_argument("--skip-provider-preflight", action="store_true")
     parser.add_argument("--wait-consumed", action="store_true", help="Wait until command.json is consumed.")
     parser.add_argument("--wait-timeout", type=float, default=10.0)
     args = parser.parse_args()
 
-    command = _read_command(args.command_file)
+    command = _read_command(args.command_file, args.command_b64)
     command_path = _absolute(args.command_path)
     status_path = _absolute(args.status_path)
     _ensure_session_waiting(status_path)
@@ -43,8 +47,18 @@ def main() -> None:
     print(json.dumps(result, ensure_ascii=False, indent=2), flush=True)
 
 
-def _read_command(command_file: Path | None) -> dict[str, Any]:
-    if command_file is None:
+def _configure_stdio() -> None:
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8")
+        except (AttributeError, ValueError):
+            pass
+
+
+def _read_command(command_file: Path | None, command_b64: str | None = None) -> dict[str, Any]:
+    if command_b64 is not None:
+        text = base64.b64decode(command_b64).decode("utf-8-sig")
+    elif command_file is None:
         text = sys.stdin.read()
     else:
         text = _absolute(command_file).read_text(encoding="utf-8-sig")

@@ -258,6 +258,25 @@ Monitor progress via `outputs/live_session/status.json`, `live_stdout.log`,
 and `live_stderr.log` only.
 ```
 
+Default live command fast path:
+
+```text
+For routine manipulation instructions in an already running live session, keep
+the Codex control loop minimal unless the user asks for deeper inspection:
+
+1. Reuse the current live session and check `outputs/live_session/status.json`
+   once to confirm `status: waiting`.
+2. Build the minimal structured command directly from the user's instruction.
+3. Submit via `src/sim/submit_live_robot_command.py --command-b64` so Chinese
+   instructions are transported as explicit UTF-8.
+4. Monitor only `outputs/live_session/status.json` until completion.
+5. Open overlays, GIFs, stdout, stderr, or planning summaries only when the
+   command fails, the VL result is ambiguous, or the user asks to inspect them.
+
+Do not re-read broad docs or source files before every live command when the
+existing command schema and session state are already known.
+```
+
 ## Validation Policy
 
 Validation has two layers:

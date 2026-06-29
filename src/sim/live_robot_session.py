@@ -75,9 +75,9 @@ class LiveHud:
         if self.model_name:
             left_lines.append(f"VL model: {self.model_name}")
         if self.instruction:
-            left_lines.append(f"Instruction: {_hud_clip(self.instruction, 56)}")
+            left_lines.append(f"Instruction: {_hud_clip(_hud_safe_text(self.instruction), 56)}")
         if self.target_query:
-            left_lines.append(f"VL query: {_hud_clip(self.target_query, 56)}")
+            left_lines.append(f"VL query: {_hud_clip(_hud_safe_text(self.target_query), 56)}")
 
         right_lines: list[str] = []
         if self.target_count is not None:
@@ -89,7 +89,7 @@ class LiveHud:
         if self.current_slot is not None:
             right_lines.append(f"Tray slot: {self.current_slot}")
         if self.detail:
-            right_lines.append(f"Detail: {_hud_clip(self.detail, 64)}")
+            right_lines.append(f"Detail: {_hud_clip(_hud_safe_text(self.detail), 64)}")
         try:
             viewer.set_texts(
                 (
@@ -108,6 +108,36 @@ def _hud_clip(value: str, limit: int) -> str:
     if len(text) <= limit:
         return text
     return text[: max(0, limit - 3)] + "..."
+
+
+def _hud_safe_text(value: str) -> str:
+    text = str(value)
+    return text if text.isascii() else "non-ASCII command (see status.json)"
+
+
+def _command_instruction(command: dict[str, Any]) -> str:
+    return str(command.get("instruction") or "")
+
+
+def _command_display_instruction(command: dict[str, Any]) -> str:
+    for key in ("display_instruction", "instruction_display", "instruction_label"):
+        value = command.get(key)
+        if value:
+            return str(value)
+    instruction = _command_instruction(command)
+    if instruction.isascii():
+        return instruction
+    target_query = str(command.get("target_query") or command.get("open_vl_query") or "")
+    if target_query and target_query.isascii():
+        return target_query
+    return "Chinese command (see status.json)"
+
+
+def _command_status_fields(command: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "instruction": command.get("instruction"),
+        "display_instruction": _command_display_instruction(command),
+    }
 
 
 def _attach_hud(viewer, hud: LiveHud) -> None:
@@ -210,11 +240,12 @@ def main() -> None:
                 _write_status(status_path, {**session_info, "status": "shutdown_requested"})
                 break
             try:
+                display_instruction = _command_display_instruction(command)
                 _set_hud(
                     viewer,
                     state="running",
                     phase="command_received",
-                    instruction=str(command.get("instruction") or ""),
+                    instruction=display_instruction,
                     target_query=str(command.get("target_query") or command.get("open_vl_query") or ""),
                     target_count=None,
                     progress_current=None,
@@ -223,7 +254,7 @@ def main() -> None:
                     current_slot=None,
                     detail="Starting command",
                 )
-                _write_status(status_path, {**session_info, "status": "running", "instruction": command.get("instruction")})
+                _write_status(status_path, {**session_info, "status": "running", **_command_status_fields(command)})
                 _run_command(
                     model,
                     data,
@@ -249,6 +280,7 @@ def main() -> None:
                         "phase": "returning_to_photo_pose_1",
                         "waiting_pose": wait_pose,
                         "last_completed_instruction": command.get("instruction"),
+                        "last_completed_display_instruction": display_instruction,
                     },
                 )
                 _set_hud(viewer, state="running", phase="returning_to_photo_pose_1", detail="Returning to waiting pose")
@@ -273,6 +305,7 @@ def main() -> None:
                         "waiting_pose": wait_pose,
                         "last_completion_status": "completed",
                         "last_completed_instruction": command.get("instruction"),
+                        "last_completed_display_instruction": display_instruction,
                         "tray_occupied_slots": _tray_occupied_slots(tray_memory),
                     },
                 )
@@ -314,7 +347,7 @@ def _run_command(
         viewer,
         state="running",
         phase="preparing",
-        instruction=str(command.get("instruction") or ""),
+        instruction=_command_display_instruction(command),
         target_query=target_query,
         detail="Preparing perception",
     )
@@ -433,7 +466,7 @@ def _run_command(
                 trace_path=trace_path,
                 tray_memory=tray_memory,
                 tray_memory_path=tray_memory_path,
-                instruction=str(command.get("instruction") or ""),
+                instruction=_command_display_instruction(command),
             )
             return
         _set_hud(viewer, phase="parallel_fixed_seed_planning", detail=f"Planning {len(localized_targets)} item(s)")
