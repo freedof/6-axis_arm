@@ -18,7 +18,7 @@
 
 所以，RRT-Connect 之后，项目的重心从“让机械臂会规划路径”，转向了“让机械臂听懂一句任务描述，并通过视觉和深度信息完成一次可验证的抓取”。
 
-![视觉抓取闭环最终演示](article_assets/post_rrt_connect_progress/06_pick_result.gif)
+![视觉抓取闭环最终演示](../article_assets/post_rrt_connect_progress/06_pick_result.gif)
 
 图：从深度相机拍照、视觉模型定位目标，到生成三维抓取点、RRT-Connect 规划路径，并在 MuJoCo 中完成夹取和抬起的闭环演示。
 
@@ -81,11 +81,11 @@ RGB 图像，用于视觉语言模型判断目标区域。
 相机外参，用于把相机坐标变换到世界坐标。
 深度噪声，用于让仿真更接近真实传感器。
 
-![D435i 第一视角 RGB 图](article_assets/post_rrt_connect_progress/02_d435i_rgb.png)
+![D435i 第一视角 RGB 图](../article_assets/post_rrt_connect_progress/02_d435i_rgb.png)
 
 图：夹爪根部 D435i 的第一视角。可以看到夹爪边缘、桌面和目标方块。
 
-![D435i 深度图可视化](article_assets/post_rrt_connect_progress/03_depth_vis.png)
+![D435i 深度图可视化](../article_assets/post_rrt_connect_progress/03_depth_vis.png)
 
 图：同一视角下的深度图可视化。深度信息负责把图像区域转换成三维位置。
 
@@ -109,7 +109,7 @@ MuJoCo 负责验证抓取过程中的接触和动力学。
 
 大模型擅长语义理解，比如“找到桌面上的红色小方块”。但它不应该绕过深度相机，也不应该直接决定机械臂怎么动。机械臂动作仍然要经过几何计算、碰撞检查、奇异性检查和路径规划。
 
-![视觉模型输出目标区域](article_assets/post_rrt_connect_progress/04_vl_overlay.png)
+![视觉模型输出目标区域](../article_assets/post_rrt_connect_progress/04_vl_overlay.png)
 
 图：视觉模型在 D435i RGB 图上输出目标区域。黄色框表示模型选择的小红色方块。
 
@@ -132,7 +132,7 @@ MuJoCo 负责验证抓取过程中的接触和动力学。
 
 多视角结果不是简单平均。流程会先过滤掉高度明显不对、深度像素不足、或者落在桌面附近的候选，再把剩下的三维点做聚类。只有落在同一个空间簇里的结果，才会被融合成最终目标。
 
-![多视角视觉定位结果](article_assets/post_rrt_connect_progress/05_multiview_overlays.png)
+![多视角视觉定位结果](../article_assets/post_rrt_connect_progress/05_multiview_overlays.png)
 
 图：四个高位视角下，视觉模型都框到了同一个红色方块。多视角结果会继续经过深度反投影和三维一致性检查。
 
@@ -180,7 +180,7 @@ MuJoCo 执行动力学抓取。
 
 这是这个阶段最关键的进展：路径规划不再孤立存在，而是被接入了感知、抓取和验证闭环。
 
-![多视角视觉抓取闭环 GIF](article_assets/post_rrt_connect_progress/06_pick_result.gif)
+![多视角视觉抓取闭环 GIF](../article_assets/post_rrt_connect_progress/06_pick_result.gif)
 
 图：从视觉定位到 RRT-Connect 规划，再到 MuJoCo 动力学抓取的完整闭环演示。
 

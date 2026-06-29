@@ -16,7 +16,7 @@
 
 所以最近这一步，我把项目从“单物体抓取”推进到了“多物体场景中的语言指令操作”。
 
-![多物体桌面场景第一视角](article_assets/multi_object_pick_place/d435i_rgb.png)
+![多物体桌面场景第一视角](../article_assets/multi_object_pick_place/d435i_rgb.png)
 
 图：夹爪根部 D435i 看到的多物体桌面场景。桌面上同时存在不同颜色的方块和圆柱体，右侧加入了托盘作为放置目标。
 
@@ -96,7 +96,7 @@ flowchart TD
 
 我不希望大模型直接输出关节角，也不希望它绕过深度相机直接猜坐标。机器人系统里，语义理解和几何控制应该分层。这样即使视觉模型偶尔不稳定，后面还有深度一致性、多视角聚类、碰撞检查和人工验收这些安全边界。
 
-![多物体场景深度图](article_assets/multi_object_pick_place/d435i_raw_depth_vis.png)
+![多物体场景深度图](../article_assets/multi_object_pick_place/d435i_raw_depth_vis.png)
 
 图：同一多物体场景下的深度图可视化。视觉模型给出图像区域后，深度图负责把目标区域反投影到三维空间。
 
@@ -122,7 +122,7 @@ flowchart TD
 
 这一步让我意识到，RRT-Connect 不只是上一阶段的“路径规划实验”。它已经变成了整个操作闭环里的核心运动规划能力。视觉和语言告诉系统目标是什么、在哪里；RRT-Connect 决定机械臂怎样安全地过去。
 
-![蓝色方块放入托盘](article_assets/multi_object_pick_place/blue_cube_tray_pick_place.gif)
+![蓝色方块放入托盘](../article_assets/multi_object_pick_place/blue_cube_tray_pick_place.gif)
 
 图：输入“把蓝色方块放到托盘中”后，系统通过多视角 VL 和深度定位蓝色方块，并规划 pick-and-place 动作放入托盘。
 
@@ -142,7 +142,7 @@ flowchart TD
 
 这才像一个真正的桌面整理任务。
 
-![所有圆柱体连续放入托盘](article_assets/multi_object_pick_place/all_cylinders_continuous.gif)
+![所有圆柱体连续放入托盘](../article_assets/multi_object_pick_place/all_cylinders_continuous.gif)
 
 图：输入“把所有圆柱体夹到托盘中”后，机械臂在同一个连续仿真状态里依次搬运绿色圆柱体和黄色圆柱体。
 

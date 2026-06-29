@@ -187,9 +187,9 @@ outputs/gripper_pick/simplified_gripper_pick_cube.gif
 See:
 
 ```text
-docs/phase1_model_setup.md
-docs/phase2_kinematics.md
-docs/phase3_planning.md
-docs/phase4_gripper.md
+docs/phases/phase1_model_setup.md
+docs/phases/phase2_kinematics.md
+docs/phases/phase3_planning.md
+docs/phases/phase4_gripper.md
 docs/mcp_robot_server.md
 ```

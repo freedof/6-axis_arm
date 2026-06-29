@@ -112,7 +112,7 @@ MCP server verification:
 Complete validation guidance lives in:
 
 ```text
-docs/validation_guide.md
+docs/validation/validation_guide.md
 ```
 
 ## Code Layout
@@ -126,7 +126,7 @@ src/planning/*.py           Collision, singularity checks, RRT-Connect, trajecto
 src/perception/*.py         VL region schemas, provider calls, RGB-D back-projection
 src/mcp_robot/*.py          Local MCP robot server and high-level robot skills
 src/sim/*.py                Model generators, verification, demos, rendering scripts
-docs/                       Phase notes, roadmap, validation reports
+docs/                       Roadmap, phase notes, validation reports, articles
 assets/vendor/              Downloaded vendor ROS reference model
 ```
 
@@ -135,15 +135,15 @@ assets/vendor/              Downloaded vendor ROS reference model
 Use these documents as the source of truth for details:
 
 ```text
-docs/validation_guide.md        Validation command groups and acceptance rules
-docs/rrt_connect_test_report.md RRT-Connect cases, GIF mappings, scene checks
-docs/project_roadmap.md         Long-term roadmap toward LLM/VLA operation
-docs/phase3_planning.md         Planning and obstacle validation notes
-docs/phase4_gripper.md          Simplified gripper model and cube-pick notes
-docs/phase5_d435i_camera.md     D435i camera model and RGB-D preview notes
-docs/phase6_vl_perception.md    VL provider setup and RGB-D target localization
-docs/vl_planned_pick.md         target_3d to grasp-pose and planned-pick flow
-docs/mcp_robot_server.md        Local MCP tool schemas and usage examples
+docs/validation/validation_guide.md        Validation command groups and acceptance rules
+docs/validation/rrt_connect_test_report.md RRT-Connect cases, GIF mappings, scene checks
+docs/project_roadmap.md                    Long-term roadmap toward LLM/VLA operation
+docs/phases/phase3_planning.md             Planning and obstacle validation notes
+docs/phases/phase4_gripper.md              Simplified gripper model and cube-pick notes
+docs/phases/phase5_d435i_camera.md         D435i camera model and RGB-D preview notes
+docs/phases/phase6_vl_perception.md        VL provider setup and RGB-D target localization
+docs/vl_planned_pick.md                    target_3d to grasp-pose and planned-pick flow
+docs/mcp_robot_server.md                   Local MCP tool schemas and usage examples
 ```
 
 Keep case-specific validation details in the test documents, not in this file.

@@ -4,7 +4,7 @@
 
 我只说了一句：“把桌面上的红色方块夹起来。”
 
-![视觉抓取闭环最终演示](<F:/6-axis arm/docs/article_assets/post_rrt_connect_progress/06_pick_result.gif>)
+![视觉抓取闭环最终演示](../article_assets/post_rrt_connect_progress/06_pick_result.gif)
 
 图：从深度相机拍照、视觉模型定位目标，到生成三维抓取点、RRT-Connect 规划路径，并在 MuJoCo 中完成夹取和抬起的闭环演示。
 
@@ -28,7 +28,7 @@
 
 在拆开每个环节之前，先把整体逻辑放在这里。这条链路最关键的特征是：**语言负责说要什么，视觉负责找在哪，几何负责算成三维，规划负责怎么去，物理负责验证真的夹住了。** 每一层只做自己该做的事，谁都不越界。
 
-![视觉抓取闭环整体逻辑流程图](<F:/6-axis arm/docs/article_assets/post_rrt_connect_progress/flow_diagram.svg>)
+![视觉抓取闭环整体逻辑流程图](../article_assets/post_rrt_connect_progress/flow_diagram.svg)
 
 图：从语言指令到人工验收的完整闭环。感知负责找在哪、规划负责怎么去、物理负责验证真的夹住了；两条橙色虚线是系统的「不确定就退回」回路——多视角通不过、或人工验收不通过，都回到重新拍照。
 
@@ -80,11 +80,11 @@ RRT-Connect 阶段，机械臂末端只是一个参考点。它适合做运动�
 
 还有一个小但要命的细节：D435i 的第一视角默认隐藏了 MuJoCo 的 site 调试标记。否则黄色目标点、TCP 点这些本来用来调试的标记会出现在 RGB 图里，视觉模型很可能把它们当成真实物体去框。感知链路的输入必须干净，不能混进只有开发者才看得懂的辅助标记。
 
-![D435i 第一视角 RGB 图](<F:/6-axis arm/docs/article_assets/post_rrt_connect_progress/02_d435i_rgb.png>)
+![D435i 第一视角 RGB 图](../article_assets/post_rrt_connect_progress/02_d435i_rgb.png)
 
 图：夹爪根部 D435i 的第一视角。可以看到夹爪边缘、桌面和目标方块。
 
-![D435i 深度图可视化](<F:/6-axis arm/docs/article_assets/post_rrt_connect_progress/03_depth_vis.png>)
+![D435i 深度图可视化](../article_assets/post_rrt_connect_progress/03_depth_vis.png)
 
 图：同一视角下的深度图可视化。深度信息负责把图像区域转换成三维位置。
 
@@ -98,7 +98,7 @@ RRT-Connect 阶段，机械臂末端只是一个参考点。它适合做运动�
 
 这条边界很重要。大模型擅长语义理解，比如“找到桌面上的红色小方块”。但它不该绕过深度相机，也不该直接决定机械臂怎么动——动作仍然要走几何计算、碰撞检查、奇异性检查和路径规划。换句话说，大模型是感知链路里的一个环节，不是整个机器人控制系统。
 
-![视觉模型输出目标区域](<F:/6-axis arm/docs/article_assets/post_rrt_connect_progress/04_vl_overlay.png>)
+![视觉模型输出目标区域](../article_assets/post_rrt_connect_progress/04_vl_overlay.png)
 
 图：视觉模型在 D435i RGB 图上输出目标区域。黄色框表示模型选择的小红色方块。
 
@@ -112,7 +112,7 @@ RRT-Connect 阶段，机械臂末端只是一个参考点。它适合做运动�
 
 融合不是简单平均。流程会先过滤掉高度明显不对、深度像素不足、或落在桌面附近的候选，再把剩下的三维点做聚类，只有落在同一个空间簇里的结果才会被融合成最终目标。
 
-![多视角视觉定位结果](<F:/6-axis arm/docs/article_assets/post_rrt_connect_progress/05_multiview_overlays.png>)
+![多视角视觉定位结果](../article_assets/post_rrt_connect_progress/05_multiview_overlays.png)
 
 图：四个高位视角下，视觉模型都框到了同一个红色方块。多视角结果会继续经过深度反投影和三维一致性检查。
 
@@ -134,7 +134,7 @@ RRT-Connect 阶段，机械臂末端只是一个参考点。它适合做运动�
 
 每一段动作都不再是简单插值，而是继续用 RRT-Connect 规划。也就是说，**RRT-Connect 从一个独立的路径规划模块，变成了抓取闭环里的核心运动规划能力。** 它没有被取代，而是被接进了更大的系统——这正是上面那张流程图里“规划”那一块的意义。
 
-![多视角视觉抓取闭环 GIF](<F:/6-axis arm/docs/article_assets/post_rrt_connect_progress/06_pick_result.gif>)
+![多视角视觉抓取闭环 GIF](../article_assets/post_rrt_connect_progress/06_pick_result.gif)
 
 图：从视觉定位到 RRT-Connect 规划，再到 MuJoCo 动力学抓取的完整闭环演示。
 

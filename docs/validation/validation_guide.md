@@ -110,7 +110,7 @@ GIF 文件自动检查：
 RRT-Connect 案例、场景说明、GIF 路径和用户验收清单以此文档为准：
 
 ```text
-docs/rrt_connect_test_report.md
+docs/validation/rrt_connect_test_report.md
 ```
 
 规划验证中，可见目标球是 collision-enabled environment obstacles。末端目标仍与球相切，并保留小的数值接触容差。

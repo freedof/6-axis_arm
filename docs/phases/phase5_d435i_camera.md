@@ -161,7 +161,7 @@ status: OK
 VL 目标区域和深度反投影的详细说明见：
 
 ```text
-docs/phase6_vl_perception.md
+docs/phases/phase6_vl_perception.md
 ```
 
 ## 后续计划

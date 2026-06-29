@@ -364,7 +364,7 @@ src/sim/d435i_model.py
 src/sim/d435i_camera.py
 src/sim/render_d435i_preview.py
 src/sim/verify_d435i_camera.py
-docs/phase5_d435i_camera.md
+docs/phases/phase5_d435i_camera.md
 ```
 
 它目前完成的是感知底座，而不是完整三维重建：
